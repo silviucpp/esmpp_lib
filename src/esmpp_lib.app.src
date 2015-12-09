@@ -1,0 +1,17 @@
+{application, esmpp_lib,
+ [
+  {description, "Smpp library"},
+  {vsn, "0.7.10"},
+  {registered, []},
+  {modules, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  crypto,
+                  public_key,
+                  ssl,
+                  lager  
+                 ]},
+  {mod, { esmpp_lib_app, []}},
+  {env, []}
+ ]}.
