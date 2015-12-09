@@ -26,6 +26,7 @@ work of it. Parameters will be enter in start_link([]) function of module
 esmpp_lib_worker as proplist.
 
 Example: 
+```
             {ok, Pid} = esmpp_lib_worker:start_link([{host, {127,0,0,1}}, 
                     {port, 2775}, {password, <<"password">>}, 
                     {system_id, <<"smppclient1">>}, {interface_version, "3.4"}, 
@@ -34,7 +35,7 @@ Example:
                     {addr_npi, 0}, {source_addr_ton, 5}, {source_addr_npi, 0}, 
                     {dest_addr_ton, 1}, {dest_addr_npi, 1}, {handler, my_sms}, 
                     {mode, transceiver}]).
-
+```
 Mandatory parameters are include next things:
 
 * host of smsc as tuple, example {host, {10,10,10,1}} host of SMSC,
