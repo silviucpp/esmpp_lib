@@ -140,7 +140,8 @@ handle_info({bind, Mode}, State) ->
             Handler = proplists:get_value(handler, Param),
             WorkerPid = proplists:get_value(worker_pid, Param),
             ok = Handler:network_error(WorkerPid, Reason),
-            WorkerPid ! {terminate, Reason};
+            WorkerPid ! {terminate, Reason},
+            Param;
         Socket ->
             Param1 = [{socket, Socket}|Param],
             ListenPid = spawn_link(?MODULE, loop_tcp, [Param1]),
@@ -317,7 +318,7 @@ assemble_resp({Name, Status, SeqNum, List}, Param) ->
     end.
 
 exam_bind_resp(Socket, Transport) ->
-    case Transport:recv(Socket, 0) of 
+    case Transport:recv(Socket, 0, 2000) of 
         {ok, Bin} ->
             [{_Name, Code, _SeqNum, _List}] = esmpp_lib_decoder:decode(Bin, []),
             case Code of 
