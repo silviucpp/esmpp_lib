@@ -13,7 +13,7 @@
 -export([start_link/1]).
 -export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2,
          replace_sm/2]).
--export([loop_tcp/1, processing_submit/5]).
+-export([loop_tcp/1, processing_submit/5, enquire_link/1]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -82,10 +82,8 @@ unbind(WorkerPid) ->
 init(Param) ->
     Mode = proplists:get_value(mode, Param),
     SubmitTimeout = get_timeout(submit_timeout, Param),
-    EnquireTimeout = get_timeout(enquire_timeout, Param)*1000,
     {ok, _} = timer:send_after(10, {bind, Mode}),
     {ok, _} = timer:send_interval(60000, {exam_submit, SubmitTimeout}),
-    {ok, _} = timer:send_interval(EnquireTimeout, enquire_link),
     WorkerPid = self(),
     Param1 = [{submit_check, []}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid}|Param],            
     {ok, Param1}.
@@ -145,15 +143,13 @@ handle_info({bind, Mode}, State) ->
         Socket ->
             Param1 = [{socket, Socket}|Param],
             ListenPid = spawn_link(?MODULE, loop_tcp, [Param1]),
+            _ = spawn_link(?MODULE, enquire_link, [Param1]),
             [{mode, Mode},{listen_pid, ListenPid}|Param1]
     end,
     {noreply, State1};
 handle_info({exam_submit, SubmitTimeout}, State) ->
     ListSubmit = proplists:get_value(submit_check, State),
     ok = exam_submit(SubmitTimeout, State, ListSubmit, []),
-    {noreply, State};
-handle_info(enquire_link, State) ->
-    ok = enquire_link(State),
     {noreply, State};
 handle_info({update_state, {add_submit, Value}}, State) ->
     ListSubmit = proplists:get_value(submit_check, State),
@@ -334,10 +330,13 @@ exam_bind_resp(Socket, Transport) ->
     end.
 
 enquire_link(State) ->
+    EnquireTimeout = get_timeout(enquire_timeout, State)*1000,
+    timer:sleep(EnquireTimeout),
     Transport = get_transport(State),
     Socket = proplists:get_value(socket, State),
     Bin = esmpp_lib_encoder:encode(enquire_link, State),
-    ok = Transport:send(Socket, Bin).                       
+    ok = Transport:send(Socket, Bin),
+    enquire_link(State).                       
     
         
 exam_submit(_Timeout, State, [], Acc) ->
@@ -368,7 +367,6 @@ get_transport(Param) ->
     
 get_timeout(Key, Param) ->
     Value = proplists:get_value(Key, Param),
-    ?LOG_INFO("Timeout of ~p is ~p~n", [Key, Value]),
     case is_integer(Value) of 
         true ->
             Value;

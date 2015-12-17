@@ -28,15 +28,11 @@ esmpp_lib_worker as proplist.
 Example, run library as standalone application: 
 ```
 nick@happy:~/esmpp_lib$ erl -pa ebin/ deps/*/ebin
-
-Erlang/OTP 17 [erts-6.4.1] [source-381fb6c] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
-Eshell V6.4.1  (abort with ^G)
 1> 
 1> ssl:start().
 ok
 2> lager:start().
 ok
-3> 15:31:37.194 [info] Application lager started on node nonode@nohost
 3> {ok, Pid} = esmpp_lib_worker:start_link([{host, {127,0,0,1}}, 
                     {port, 2775}, {password, <<"password">>}, 
                     {system_id, <<"smppclient1">>}, {interface_version, "3.4"}, 
@@ -46,13 +42,10 @@ ok
                     {dest_addr_ton, 1}, {dest_addr_npi, 1}, {handler, my_sms}, 
                     {mode, transceiver}]).
 
-15:31:56.467 [info] Timeout of submit_timeout is 60
-15:31:56.467 [info] Timeout of enquire_timeout is 30
 {ok,<0.78.0>}
 4> 
 4> ok = esmpp_lib_worker:submit(Pid, [{source_addr, <<"Test">>}, {dest_addr, <<"380555222333">>}, {text, <<"Test sms">>}]).                                                          
 ok
-15:32:37.021 [info] Send msg submit [{source_addr,<<"Test">>},{dest_addr,<<"380555222333">>},{text,<<"Test sms">>}]
 
 ```
 Mandatory parameters are include next things:
