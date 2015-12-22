@@ -99,34 +99,41 @@ submit_sm_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
 
 deliver_sm(<<0:32/integer, SeqNum:32/integer, Rest/binary>>) ->
     Len = byte_size(parse_c_octets(Rest, []))+1,
-    <<_SrvT:Len/binary, _STon:8/integer, _SNpi:8/integer, Tail/binary>> = Rest, 
+    <<SrvT:Len/binary, STon:8/integer, SNpi:8/integer, Tail/binary>> = Rest, 
     Len1 = byte_size(parse_c_octets(Tail, []))+1,
-    <<Saddr:Len1/binary, _DTon:8/integer, _DNpi:8/integer, Tail1/binary>> = Tail,
+    <<Saddr:Len1/binary, DTon:8/integer, DNpi:8/integer, Tail1/binary>> = Tail,
     Len2 = byte_size(parse_c_octets(Tail1, []))+1,
-    <<Daddr:Len2/binary, EsmCl:8/integer, _ProtId:8/integer, _PrFl:8/integer, Tail2/binary>> = Tail1,
+    <<Daddr:Len2/binary, EsmCl:8/integer, ProtId:8/integer, PrFl:8/integer, Tail2/binary>> = Tail1,
     Len3 = byte_size(parse_c_octets(Tail2, []))+1,
     <<_Shed:Len3/binary, Tail3/binary>> = Tail2,
     Len4 = byte_size(parse_c_octets(Tail3, []))+1,
-    <<_Val:Len4/binary, _Reg:8/integer, _Repl:8/integer, _DataC:8/integer, 
+    <<_Val:Len4/binary, RegDel:8/integer, _Repl:8/integer, DataC:8/integer, 
         _SmD:8/integer, SmL:8/integer, Msg:SmL/binary, Opt/binary>> = Tail3,  
     SourceAddr = parse_c_octets(Saddr, []),
+    ServType = parse_c_octets(SrvT, []),
     DestAddr = parse_c_octets(Daddr, []),
     List = get_tag(Opt, []),
     {deliver_sm, 0, SeqNum, [{source_addr, SourceAddr}, {destination_addr, DestAddr}, 
-        {short_message, Msg}, {esm_class, EsmCl}|List]}.
+    {service_type, ServType}, {source_addr_ton, STon}, {source_addr_npi, SNpi}, 
+    {dest_addr_ton, DTon}, {dest_addr_npi, DNpi},
+    {short_message, Msg}, {data_coding, DataC}, {registered_delivery, RegDel}, 
+    {protocol_id, ProtId}, {priority_flag, PrFl}, {esm_class, EsmCl}|List]}.
 
 data_sm(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
     Len = byte_size(parse_c_octets(Rest, []))+1,
-    <<_SrvT:Len/binary, _STon:8/integer, _SNpi:8/integer, Tail/binary>> = Rest, 
+    <<SrvT:Len/binary, STon:8/integer, SNpi:8/integer, Tail/binary>> = Rest, 
     Len1 = byte_size(parse_c_octets(Tail, []))+1,
-    <<Saddr:Len1/binary, _DTon:8/integer, _DNpi:8/integer, Tail1/binary>> = Tail,
+    <<Saddr:Len1/binary, DTon:8/integer, DNpi:8/integer, Tail1/binary>> = Tail,
     Len2 = byte_size(parse_c_octets(Tail1, []))+1,
-    <<Daddr:Len2/binary, EsmCl:8/integer, _RDel:8/integer, _DataC:8/integer, Opt/binary>> = Tail1,
+    <<Daddr:Len2/binary, EsmCl:8/integer, RDel:8/integer, DataC:8/integer, Opt/binary>> = Tail1,
     SourceAddr = parse_c_octets(Saddr, []),
     DestAddr = parse_c_octets(Daddr, []),
+    ServType = parse_c_octets(SrvT, []),
     List = get_tag(Opt, []),
-    {data_sm, Status, SeqNum, [{source_addr, SourceAddr}, 
-        {destination_addr, DestAddr}, {esm_class, EsmCl}|List]}.
+    {data_sm, Status, SeqNum, [{source_addr, SourceAddr}, {data_coding, DataC},
+    {service_type, ServType}, {source_addr_ton, STon}, {source_addr_npi, SNpi}, 
+    {dest_addr_ton, DTon}, {dest_addr_npi, DNpi},{registered_delivery, RDel},
+    {destination_addr, DestAddr}, {esm_class, EsmCl}|List]}.
 
 data_sm_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) -> 
     case byte_size(Rest)>0 of
