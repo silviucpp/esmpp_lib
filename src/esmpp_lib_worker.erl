@@ -241,7 +241,6 @@ loop_tcp(Param) ->
             catch
                 _Class:Reason ->
                     Size = byte_size(Bin),
-                    ?LOG_DEBUG("Byte size ~p~n",[Size]),
                     Handler:decoder_error(WorkerPid, Bin),                        
                     WorkerPid ! {terminate, Reason}
             end;
@@ -283,7 +282,7 @@ assemble_resp({Name, Status, SeqNum, List}, Param) ->
             ok; 
         deliver_sm -> 
             MsgId = proplists:get_value(receipted_message_id, List),
-            ok = Handler:deliver_sm_handler(WorkerPid, List),
+            ok = Handler:deliver_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); %%TODO status
         submit_sm_resp ->
             spawn(?MODULE, processing_submit, [Param, List, SeqNum, submit_sm_resp_handler, Status]), 
@@ -293,10 +292,10 @@ assemble_resp({Name, Status, SeqNum, List}, Param) ->
             ok;
         data_sm ->                                                                                  %% TODO, need testing data_sm !!!
             MsgId = proplists:get_value(receipted_message_id, List),
-            ok = Handler:data_sm_handler(WorkerPid, List),
+            ok = Handler:data_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); %%TODO status
         query_sm_resp ->
-            ok = Handler:query_sm_handler(WorkerPid, [{command_status, Status}|List]);
+            ok = Handler:query_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]);
         alert_notification ->
             ok;
         outbind ->
@@ -392,6 +391,7 @@ processing_submit(Param, List, SeqNum, OperationHandler, Status) ->
     ListSubmit = proplists:get_value(submit_check, State),
     case is_tuple(proplists:get_value(SeqNum, ListSubmit)) of
         true ->
+            timer:sleep(2000),
             WorkerPid ! {update_state, {delete_submit, SeqNum}},
             apply(Handler, OperationHandler, [WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]]);
         false ->
