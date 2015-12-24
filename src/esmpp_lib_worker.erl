@@ -393,7 +393,7 @@ processing_submit(Param, List, SeqNum, OperationHandler, Status) ->
         true ->
             timer:sleep(2000),
             WorkerPid ! {update_state, {delete_submit, SeqNum}},
-            apply(Handler, OperationHandler, [WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]]);
+            ok = Handler:OperationHandler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]);
         false ->
             ok = Handler:submit_error(WorkerPid, undefined, Socket, SeqNum)
     end.        
