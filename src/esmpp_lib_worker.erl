@@ -240,7 +240,6 @@ loop_tcp(Param) ->
                     loop_tcp(Param)
             catch
                 _Class:Reason ->
-                    Size = byte_size(Bin),
                     Handler:decoder_error(WorkerPid, Bin),                        
                     WorkerPid ! {terminate, Reason}
             end;

@@ -247,13 +247,13 @@ exam_unicode(Bin, Param) ->
     Utf = unicode:characters_to_list(Bin),
     case Latin1 =/= Utf of 
         true ->
-	        {8, 134};
+	        {8, 140};
         false ->
             Num = proplists:get_value(data_coding, Param),
             case Num of 
-                undefined -> {0, 153};
-	            0 -> {0, 153};
-                3 -> {3, 134}
+                undefined -> {0, 160};
+	            0 -> {0, 160};
+                3 -> {3, 140}
             end
     end.
 
@@ -282,12 +282,16 @@ sar_ref_num(Param) ->
     end.
  
 cut_txt(Text, Num, MaxLen, Acc) ->
-    case byte_size(Text) =< MaxLen of
+    ChunkLen = case MaxLen of
+        160 -> 153;
+        140 -> 134
+    end,
+    case byte_size(Text) =< ChunkLen of
         true ->
             Len = 1 + length(Acc),
             {Len, [{Num, Text}|Acc]};
         false ->
-            <<Chunk:MaxLen/binary, Rest/binary>> = Text,
+            <<Chunk:ChunkLen/binary, Rest/binary>> = Text,
             cut_txt(Rest, Num+1, MaxLen, [{Num, Chunk}|Acc])
     end.
 
