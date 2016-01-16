@@ -390,9 +390,10 @@ processing_submit(Param, List, SeqNum, OperationHandler, Status) ->
     ListSubmit = proplists:get_value(submit_check, State),
     case is_tuple(proplists:get_value(SeqNum, ListSubmit)) of
         true ->
+            ok = Handler:OperationHandler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             timer:sleep(2000),
             WorkerPid ! {update_state, {delete_submit, SeqNum}},
-            ok = Handler:OperationHandler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]);
+            ok;
         false ->
             ok = Handler:submit_error(WorkerPid, undefined, Socket, SeqNum)
     end.        
