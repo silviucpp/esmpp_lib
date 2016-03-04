@@ -48,7 +48,7 @@ ok
 ok
 
 ```
-Mandatory parameters includes next things:
+Mandatory parameters include next things:
 
 * host of smsc as tuple, example {host, {10,10,10,1}} host of SMSC,
 * port of smsc, example {port, 5000} - port SMSC,

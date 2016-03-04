@@ -240,7 +240,7 @@ loop_tcp(Buffer, Param) ->
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
             try esmpp_lib_decoder:decode(Bin, []) of
-                {undefined, Name} ->
+                [{undefined, Name}|_] ->
                     ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
                     loop_tcp(<<>>, Param);
                 List ->
