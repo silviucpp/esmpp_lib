@@ -13,7 +13,7 @@
 -export([start_link/1]).
 -export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2,
          replace_sm/2]).
--export([loop_tcp/1, processing_submit/5, enquire_link/1]).
+-export([loop_tcp/2, processing_submit/5, enquire_link/1]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -142,8 +142,13 @@ handle_info({bind, Mode}, State) ->
             Param;
         Socket ->
             Param1 = [{socket, Socket}|Param],
-            ListenPid = spawn_link(?MODULE, loop_tcp, [Param1]),
-            _ = spawn_link(?MODULE, enquire_link, [Param1]),
+            ListenPid = spawn_link(?MODULE, loop_tcp, [<<>>, Param1]),
+            case proplists:get_value(enquire_timeout, Param1) of
+                undefined ->
+                    ok;
+                _ ->
+                    _ = spawn_link(?MODULE, enquire_link, [Param1])
+            end,
             [{mode, Mode},{listen_pid, ListenPid}|Param1]
     end,
     {noreply, State1};
@@ -203,8 +208,8 @@ connect(Param) ->
     Transport = get_transport(Param),
     Ip = proplists:get_value(host, Param),
     Port = proplists:get_value(port, Param),
-    Transport:connect(Ip, Port, [binary, {active, false}, {buffer, 65535}, 
-                        {keepalive, true}, {reuseaddr, true}, {packet, raw}]).
+    Transport:connect(Ip, Port, [binary, {active, false},
+                        {keepalive, true}, {reuseaddr, true}, {packet, 0}]).
 
 handle_bind(Resp, Socket, Transport) ->
     case Resp of
@@ -227,7 +232,7 @@ send_sms([Bin|T], State) ->
     WorkerPid ! {update_state, {add_submit, {SeqNum, {Handler, Ts, Socket}}}},
     send_sms(T, State).
 
-loop_tcp(Param) ->
+loop_tcp(Buffer, Param) ->
     Transport = get_transport(Param),
     Handler = proplists:get_value(handler, Param),
     Socket = proplists:get_value(socket, Param),
@@ -235,13 +240,21 @@ loop_tcp(Param) ->
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
             try esmpp_lib_decoder:decode(Bin, []) of
+                {undefined, Name} ->
+                    ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
+                    loop_tcp(<<>>, Param);
                 List ->
                     ok = create_resp(List, Param),
-                    loop_tcp(Param)
+                    loop_tcp(<<>>, Param)
             catch
                 _Class:Reason ->
-                    Handler:decoder_error(WorkerPid, Bin),                        
-                    WorkerPid ! {terminate, Reason}
+                    case byte_size(Bin)>1535 of
+                        true ->
+                            Handler:decoder_error(WorkerPid, Bin),                        
+                            WorkerPid ! {terminate, Reason};
+                        false ->
+                            loop_tcp(<<Buffer/bitstring, Bin/bitstring>>, Param)
+                    end
             end;
         {error, closed} ->
             ok = Handler:network_error(WorkerPid, closed),
@@ -328,7 +341,7 @@ exam_bind_resp(Socket, Transport) ->
     end.
 
 enquire_link(State) ->
-    EnquireTimeout = get_timeout(enquire_timeout, State)*1000,
+    EnquireTimeout = proplists:get_value(enquire_timeout, State)*1000,
     timer:sleep(EnquireTimeout),
     Transport = get_transport(State),
     Socket = proplists:get_value(socket, State),

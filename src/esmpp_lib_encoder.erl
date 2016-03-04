@@ -143,7 +143,6 @@ data_sm_resp(List) ->
     ?DATA_SM_RESP(Length, Status, SeqNum, MsgId, LenId).
 
 deliver_sm_resp(List) -> 
-    ?LOG_INFO("Deliver sm resp ~p~n", [List]),   
     SeqNum = proplists:get_value(sequence_number, List),
     Status = proplists:get_value(status, List),
     Bin = ?DELIVER_SM_RESP(1234, Status, SeqNum),

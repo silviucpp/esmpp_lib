@@ -46,7 +46,31 @@ decode(<<Length:32/integer, Id:32/integer, Rest/binary>>, Acc) ->
         2147483907 ->
             data_sm_resp(One);
         258 ->
-            alert_notification(One)
+            alert_notification(One);
+        1 ->            {undefined, bind_receiver};
+        2 ->            {undefined, bind_transmitter};
+        3 ->            {undefined, query_sm};
+        4 ->            {undefined, submit_sm};
+        7 ->            {undefined, replace_sm};
+        8 ->            {undefined, cancel_sm};
+        9 ->            {undefined, bind_transceiver};
+        10 ->           {undefined, reserved};
+        12 ->           {undefined, reserved};
+        33 ->           {undefined, submit_multi};
+        256 ->          {undefined, reserved};
+        2147483658 ->   {undefined, reserved};
+        2147483681 ->   {undefined, submit_multi_resp};
+        2147483684 ->   {undefined, reserved};
+        2147483904 ->   {undefined, reserved};
+        257 ->          {undefined, reserved};
+        2147483905 ->   {undefined, reserved};
+        2147483906 ->   {undefined, reserved};
+        260 ->          {undefined, reserved};
+        2147483908 ->   {undefined, reserved};
+        65536 ->        {undefined, reserved}; 
+        2147549184 ->   {undefined, reserved};
+        66048 ->        {undefined, reserved}; 
+        2147549696 ->   {undefined, reserved}
     end,
     decode(Tail, [Tuple|Acc]).
 
@@ -418,15 +442,21 @@ get_tag(<<TagId:16/integer, Rest/binary>>, List) ->
         4995 ->
             {Value, Tail} = parse_other_tag(Rest),
             {Tail, [{its_session_info, Value}|List]};
-        5122 ->                                         %% official specification not support this tag !! This option is from kannel SMSC
+        5120 ->                                         %% official specification not support this tag !!! There is vendor specific option
+            {Value, Tail} = parse_other_tag(Rest),
+            {Tail, [{fraud_prevention, Value}|List]}; 
+        5122 ->                                         %% official specification not support this tag !!! This option is from kannel SMSC
             {Value, Tail} = parse_other_tag(Rest),
             {Tail, [{mboperator, Value}|List]}; 
-        5123 ->                                         %% official specification not support this tag !! This option is from kannel SMSC
+        5123 ->                                         %% official specification not support this tag !!! This option is from kannel SMSC
             {Value, Tail} = parse_other_tag(Rest),
             {Tail, [{mbbilling, Value}|List]}; 
-        5124 ->                                         %% official specification not support this tag !! This option is from kannel SMSC
+        5124 ->                                         %% official specification not support this tag !!! This option is from kannel SMSC
             {Value, Tail} = parse_other_tag(Rest),
-            {Tail, [{mbsessionid, Value}|List]}
+            {Tail, [{mbsessionid, Value}|List]};
+        _ ->
+            ?LOG_WARNING("Unknown smpp option ~p~n", [TagId]),
+            {<<>>, List}
     end, 
     get_tag(Tail1, List1).
              

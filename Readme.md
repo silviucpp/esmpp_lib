@@ -48,7 +48,7 @@ ok
 ok
 
 ```
-Mandatory parameters are include next things:
+Mandatory parameters includes next things:
 
 * host of smsc as tuple, example {host, {10,10,10,1}} host of SMSC,
 * port of smsc, example {port, 5000} - port SMSC,
@@ -71,6 +71,7 @@ Mandatory parameters are include next things:
         the message should be delivered,
 * enuire link timeout, example {enquire_timeout, 60} 
         - time after which the message enquire_link will be send.
+        If this parameter is absent, enquire_link will not send.
 * handler — your own module for handle smpp packet from SMSC, 
         example {handler, my_sms},
 * service_type (default {service_type, <<>>})
