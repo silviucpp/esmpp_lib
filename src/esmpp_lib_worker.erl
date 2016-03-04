@@ -239,7 +239,7 @@ loop_tcp(Buffer, Param) ->
     WorkerPid = proplists:get_value(worker_pid, Param),
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
-            try esmpp_lib_decoder:decode(Bin, []) of
+            try esmpp_lib_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>, []) of
                 [{undefined, Name}|_] ->
                     ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
                     loop_tcp(<<>>, Param);

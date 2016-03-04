@@ -11,12 +11,13 @@ Prepare to work
 ---------------
 Esmpp_lib use Erlang.mk. Input "make" for build the project.
 Esmpp_lib work with smpp protocol version 3.4 and 5.0. Version 5.0 will 
-be work only if SMSC support it.It is designed for sending sms and processing 
-SMSC answers to this sms. Technical traffic, is hidded from the user 
-(such as packages enquire_link, packages for bind to provider etc). 
-Time at which the enquire link packet send must be set in start parameters. 
-Time after the end of which submit_sm_resp packet are not received and 
-handle as error also must be set in it.
+be work only if SMSC support it.It is designed as ESME (in smpp terminology) 
+for sending sms and processing SMSC answers to this sms. Technical traffic, 
+is hidded from the user (such as packages enquire_link, packages for bind 
+to provider etc). Timeout for send of the enquire link packet  must 
+be set in start parameters. Time of wait the submit_sm_resp packet also must 
+be set in it. If submit_sm_resp are not received by this time it handle as 
+error. This time by default 40 second.
 
 Bind
 ----
@@ -53,9 +54,9 @@ Mandatory parameters include next things:
 * host of smsc as tuple, example {host, {10,10,10,1}} host of SMSC,
 * port of smsc, example {port, 5000} - port SMSC,
 * system_id as binary, example {system_id, <<"My_id">>} system id 
-    got from SMSC
+   was got from SMSC
 * password as binary, example {password, <<"Pass">>} 
-    password got from SMSC
+    password was got from SMSC
 * interface_version — smpp version,example {interface_version, "3.4"}
 * system_type default empty list, example {system_type, ""}
 * service_type default empty list, example {service_type, ""}
@@ -69,7 +70,7 @@ Mandatory parameters include next things:
 * transport, example {transport, tcp} - transport - ssl or tcp,
 * submit timeout, example {submit_timeout, 60} - time during which 
         the message should be delivered,
-* enuire link timeout, example {enquire_timeout, 60} 
+* enuire link timeout, example {enquire_timeout, 60} must bev integer
         - time after which the message enquire_link will be send.
         If this parameter is absent, enquire_link will not send.
 * handler — your own module for handle smpp packet from SMSC, 
@@ -89,7 +90,7 @@ for duplex mode or two different process with parameters
 {mode, transmitter} and {mode, receiver} for simplex mode.
 After success bind tuple {ok, Pid} are returned. This Pid will use for work
 with smpp session. If you need close connection, use function unbind(Pid). 
-Command "outbind" from SMSC is ignore.
+Command "outbind" from SMSC will be ignore.
 
 Dispatch
 --------
@@ -146,7 +147,7 @@ decoder_error(pid(), term()) -> ok.
 submit_error(pid(), term(), term(), term()) -> ok
 ```
 All this functions must return atom "ok".
-Function unbind_handler(Pid) intended for receiving notice that SMSC wants
+Function unbind_handler(Pid) is intended for receiving notice that SMSC wants
 to close connection. Function network_error(Pid, Reason) return a reason of
 error tcp connection and socket of this process. Function 
 submit_error(Pid, Socket, SeqNum) return the pid and the socket of channel 
@@ -174,6 +175,6 @@ Embedding
 ---------
 
 When you will embed esmpp_lib in your application you must remove a module 
-my_sms.erl, this is test module and the callback function must be described in 
+my_sms.erl. This is test module and the callback function must be described in 
 module of your application. Also, parameter "handler" in configuration 
 parameters must contain name of your module as atom.
