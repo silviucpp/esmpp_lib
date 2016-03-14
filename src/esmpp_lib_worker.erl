@@ -93,8 +93,8 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({submit, List}, State) ->   
     SmsList = esmpp_lib_encoder:encode(submit_sm, State, List),
-    ok = send_sms(SmsList, State),
-    {noreply, accumulate_seq_num(State)}; 
+    State1 = send_sms(SmsList, State),
+    {noreply, State1}; 
 handle_cast({query_sm, List}, State) ->
     Transport = get_transport(State),
     Handler = proplists:get_value(handler, State),
@@ -121,8 +121,8 @@ handle_cast({cancel_sm, List}, State) ->
     {noreply, accumulate_seq_num(State)}; 
 handle_cast({data_sm, List}, State) ->
     SmsList = esmpp_lib_encoder:encode(data_sm, State, List),
-    ok = send_sms([SmsList], State),
-    {noreply, accumulate_seq_num(State)}; 
+    State1 = send_sms([SmsList], State),
+    {noreply, State1}; 
 handle_cast({unbind, []}, State) ->
     Transport = get_transport(State),
     Handler = proplists:get_value(handler, State),
@@ -224,8 +224,8 @@ handle_bind(Resp, Socket, Transport) ->
             {error, Reason}
     end.
 
-send_sms([], _State) ->
-    ok;
+send_sms([], State) ->
+    State;
 send_sms([Bin|T], State) ->
     Transport = get_transport(State),
     WorkerPid = proplists:get_value(worker_pid, State),

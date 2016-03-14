@@ -206,7 +206,7 @@ replace_sm(List, Param) ->
                         LenS, LenTxt, Txt).
 
 assemble_submit({_SarTotSeg, []}, _SarRefNum, _List, _Param, _Encode, Acc) ->
-    Acc;
+    lists:reverse(Acc);
 assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
     {SarSegNum, Chunk} = H,
     Daddr = get_binary(dest_addr, List),
@@ -229,7 +229,8 @@ assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
     Bin1 = ?SUBMIT_SM_CUT(Length, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                     Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr,
                     Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg),
-    assemble_submit({SarTotSeg, T}, SarRefNum, List, Param, Encode, [Bin1|Acc]).
+    Param1 = lists:keyreplace(seq_n, 1, Param, {seq_n, SeqNum+1}),
+    assemble_submit({SarTotSeg, T}, SarRefNum, List, Param1, Encode, [Bin1|Acc]).
 
 get_text_by_code(Encode, Bin) ->
     case Encode of 
@@ -288,7 +289,7 @@ cut_txt(Text, Num, MaxLen, Acc) ->
     case byte_size(Text) =< ChunkLen of
         true ->
             Len = 1 + length(Acc),
-            {Len, [{Num, Text}|Acc]};
+            {Len, lists:reverse([{Num, Text}|Acc])};
         false ->
             <<Chunk:ChunkLen/binary, Rest/binary>> = Text,
             cut_txt(Rest, Num+1, MaxLen, [{Num, Chunk}|Acc])
