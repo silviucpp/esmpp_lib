@@ -213,8 +213,8 @@ connect(Param) ->
     Transport = get_transport(Param),
     Ip = proplists:get_value(host, Param),
     Port = proplists:get_value(port, Param),
-    Transport:connect(Ip, Port, [binary, {active, false},
-                        {keepalive, true}, {reuseaddr, true}, {packet, 0}]).
+    _ = Transport:connect(Ip, Port, [binary, {active, false},
+                        {keepalive, true}, {reuseaddr, true}, {packet, 0}], 2000).
 
 handle_bind(Resp, Socket, Transport) ->
     case Resp of
@@ -320,7 +320,7 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler) ->
     end.
 
 exam_bind_resp(Socket, Transport) ->
-    case Transport:recv(Socket, 0, 2000) of 
+    case Transport:recv(Socket, 0, 5000) of 
         {ok, Bin} ->
             [{_Name, Code, _SeqNum, _List}] = esmpp_lib_decoder:decode(Bin, []),
             case Code of 
