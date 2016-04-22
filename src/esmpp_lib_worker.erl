@@ -13,7 +13,7 @@
 -export([start_link/1]).
 -export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2,
          replace_sm/2]).
--export([loop_tcp/5, processing_submit/7, enquire_link/1]).
+-export([loop_tcp/5, enquire_link/1]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -35,7 +35,7 @@
 -callback outbind_handler(pid(), term()) -> ok.
 -callback network_error(pid(), term()) -> ok.
 -callback decoder_error(pid(), term()) -> ok.
--callback submit_error(pid(), pid(), term(), term()) -> ok.
+-callback submit_error(pid(), term(), term()) -> ok.
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -81,11 +81,9 @@ unbind(WorkerPid) ->
 
 init(Param) ->
     Mode = proplists:get_value(mode, Param),
-    SubmitTimeout = get_timeout(submit_timeout, Param),
     {ok, _} = timer:send_after(10, {bind, Mode}),
-    {ok, _} = timer:send_interval(60000, {exam_submit, SubmitTimeout}),
     WorkerPid = self(),
-    Param1 = [{submit_check, []}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid}|Param],            
+    Param1 = [{sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid}|Param],            
     {ok, Param1}.
 
 handle_call(_Request, _From, State) ->
@@ -157,18 +155,6 @@ handle_info({bind, Mode}, Param) ->
             [{mode, Mode},{listen_pid, ListenPid}|Param1]
     end,
     {noreply, State1};
-handle_info({exam_submit, SubmitTimeout}, State) ->
-    ListSubmit = proplists:get_value(submit_check, State),
-    ok = exam_submit(SubmitTimeout, State, ListSubmit, []),
-    {noreply, State};
-handle_info({update_state, {add_submit, Value}}, State) ->
-    ListSubmit = proplists:get_value(submit_check, State),
-    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, [Value|ListSubmit]}),
-    {noreply, State1};
-handle_info({update_state, {delete_submit, SeqNum}}, State) ->
-    ListSubmit = proplists:delete(SeqNum, proplists:get_value(submit_check, State)),
-    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, ListSubmit}),
-    {noreply, State1};
 handle_info({update_state, {Name, NewEntry}}, State) ->
     State1 = lists:keyreplace(Name, 1, State, {Name, NewEntry}),
     {noreply, State1};
@@ -233,8 +219,8 @@ send_sms([Bin|T], State) ->
     Handler = proplists:get_value(handler, State),
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
-    {_, Ts, _} = now(),
-    WorkerPid ! {update_state, {add_submit, {SeqNum, {Handler, Ts, Socket}}}},
+    Ts = os:timestamp(),
+    ok = esmpp_lib_submit_processing:add_submit({SeqNum, {Handler, Ts, Socket}}),
     send_sms(T, accumulate_seq_num(State)).
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler) ->
@@ -290,17 +276,15 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler) ->
         deliver_sm -> 
             MsgId = proplists:get_value(receipted_message_id, List),
             ok = Handler:deliver_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
-            esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); %%TODO status
+            esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         submit_sm_resp ->
-            spawn(?MODULE, processing_submit, [Socket, WorkerPid, Handler, List, SeqNum, submit_sm_resp_handler, Status]), 
-            ok;
+            ok = esmpp_lib_submit_processing:processing_submit(Handler, List, SeqNum, submit_sm_resp_handler, Status); 
         data_sm_resp ->
-            spawn(?MODULE, processing_submit, [Socket, WorkerPid, Handler, List, SeqNum, data_sm_resp_handler, Status]), 
-            ok;
-        data_sm ->                                                                                  %% TODO, need testing data_sm !!!
+            ok = esmpp_lib_submit_processing:processing_submit(Handler, List, SeqNum, data_sm_resp_handler, Status); 
+        data_sm ->                                                                                  
             MsgId = proplists:get_value(receipted_message_id, List),
             ok = Handler:data_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
-            esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); %%TODO status
+            esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         query_sm_resp ->
             ok = Handler:query_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]);
         alert_notification ->
@@ -346,42 +330,13 @@ enquire_link(State) ->
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     enquire_link(accumulate_seq_num(State)).                       
     
-        
-exam_submit(_Timeout, State, [], Acc) ->
-    WorkerPid = proplists:get_value(worker_pid, State),
-    WorkerPid ! {update_state, {submit_check, Acc}},
-    ok;
-exam_submit(Timeout, State, [H|T], Acc) ->
-    WorkerPid = proplists:get_value(worker_pid, State),
-    Handler = proplists:get_value(handler, State),
-    {_, TsNow, _} = now(),
-    {Key, {Handler, TsOld, Socket}} = H,
-    Time = TsNow - TsOld,
-    Acc1 = case Time > Timeout of
-        true ->
-            ok = Handler:submit_error(WorkerPid, Socket, Key),
-            Acc;
-        false ->
-            [H|Acc]
-    end,
-    exam_submit(Timeout, State, T, Acc1).
-
 get_transport(Param) ->
     case proplists:get_value(transport, Param) of 
         tcp -> gen_tcp;
         undefined -> gen_tcp;
         ssl -> ssl
     end.
-    
-get_timeout(Key, Param) ->
-    Value = proplists:get_value(Key, Param),
-    case is_integer(Value) of 
-        true ->
-            Value;
-        false ->
-            39
-    end.
-          
+     
 accumulate_seq_num(State) ->
     SeqNum = proplists:get_value(seq_n, State),
     Value = case SeqNum of 
@@ -391,27 +346,7 @@ accumulate_seq_num(State) ->
             SeqNum + 1
     end,
     lists:keyreplace(seq_n, 1, State, {seq_n, Value}).
-    
-processing_submit(Socket, WorkerPid, Handler, List, SeqNum, OperationHandler, Status) ->
-    State = get_state(WorkerPid),
-    ListSubmit = proplists:get_value(submit_check, State),
-    case is_tuple(proplists:get_value(SeqNum, ListSubmit)) of
-        true ->
-            ok = Handler:OperationHandler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
-            ok = timer:sleep(2000),
-            WorkerPid ! {update_state, {delete_submit, SeqNum}},
-            ok;
-        false ->
-            ok = Handler:submit_error(WorkerPid, undefined, Socket, SeqNum)
-    end.        
-
-get_state(WorkerPid) ->
-    Pid = self(),
-    WorkerPid ! {get_state, Pid},
-    receive
-        {state, State} -> State
-    end.
-    
+     
 try_send(Transport, Socket, Bin, WorkerPid, Handler) -> 
     case Transport:send(Socket, Bin) of
         ok -> ok;
