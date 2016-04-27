@@ -54,7 +54,8 @@ handle_cast({update_state, {add_submit, Value}}, State) ->
     ListSubmit = proplists:get_value(submit_check, State),
     State1 = lists:keyreplace(submit_check, 1, State, {submit_check, [Value|ListSubmit]}),
     {noreply, State1};
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?LOG_DEBUG("Unknown cast msg ~p~n", [Msg]),
     {noreply, State}.
 
 handle_info({exam_submit, SubmitTimeout}, State) ->
@@ -65,11 +66,15 @@ handle_info({exam_submit, SubmitTimeout}, State) ->
     {ok, NewTRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
     State1 = lists:keyreplace(submit_tref, 1, State, {submit_tref, NewTRef}),
     {noreply, State1};
+handle_info({update_state, {submit_check, Acc}}, State) ->
+    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, Acc}),
+    {noreply, State1};
 handle_info({update_state, {delete_submit, SeqNum}}, State) ->
     ListSubmit = proplists:delete(SeqNum, proplists:get_value(submit_check, State)),
     State1 = lists:keyreplace(submit_check, 1, State, {submit_check, ListSubmit}),
     {noreply, State1};
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?LOG_DEBUG("Unknown info msg ~p~n", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
