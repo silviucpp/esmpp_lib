@@ -13,7 +13,7 @@
 -export([start_link/1]).
 -export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2,
          replace_sm/2]).
--export([loop_tcp/5, enquire_link/1]).
+-export([loop_tcp/6, enquire_link/1]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -35,7 +35,7 @@
 -callback outbind_handler(pid(), term()) -> ok.
 -callback network_error(pid(), term()) -> ok.
 -callback decoder_error(pid(), term()) -> ok.
--callback submit_error(pid(), term(), term()) -> ok.
+-callback submit_error(pid(), term()) -> ok.
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -83,7 +83,8 @@ init(Param) ->
     Mode = proplists:get_value(mode, Param),
     {ok, _} = timer:send_after(10, {bind, Mode}),
     WorkerPid = self(),
-    Param1 = [{sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid}|Param],            
+    {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link([{parent_pid, WorkerPid}|Param]),
+    Param1 = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid}|Param],            
     {ok, Param1}.
 
 handle_call(_Request, _From, State) ->
@@ -137,6 +138,7 @@ handle_cast(_Msg, State) ->
 handle_info({bind, Mode}, Param) ->
     Transport = get_transport(Param),
     WorkerPid = proplists:get_value(worker_pid, Param),
+    ProcessingPid = proplists:get_value(processing_pid, Param),
     Handler = proplists:get_value(handler, Param),
     State1 = case bind(Mode, Param) of
         {error, Reason} ->
@@ -145,7 +147,7 @@ handle_info({bind, Mode}, Param) ->
             Param;
         Socket ->
             Param1 = accumulate_seq_num([{socket, Socket}|Param]),
-            ListenPid = spawn_link(?MODULE, loop_tcp, [<<>>, Transport, Socket, WorkerPid, Handler]),
+            ListenPid = spawn_link(?MODULE, loop_tcp, [<<>>, Transport, Socket, WorkerPid, Handler, ProcessingPid]),
             case proplists:get_value(enquire_timeout, Param1) of
                 undefined ->
                     ok;
@@ -215,24 +217,25 @@ send_sms([], State) ->
 send_sms([Bin|T], State) ->
     Transport = get_transport(State),
     WorkerPid = proplists:get_value(worker_pid, State),
+    ProcessingPid = proplists:get_value(processing_pid, State),
     Socket = proplists:get_value(socket, State),
     Handler = proplists:get_value(handler, State),
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     Ts = os:timestamp(),
-    ok = esmpp_lib_submit_processing:add_submit({SeqNum, {Handler, Ts, Socket}}),
+    ProcessingPid ! {update_state, {add_submit, {SeqNum, {Handler, Ts, Socket}}}},
     send_sms(T, accumulate_seq_num(State)).
 
-loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler) ->
+loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
             try esmpp_lib_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>, []) of
                 [{undefined, Name}|_] ->
                     ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
-                    loop_tcp(<<>>, Transport, Socket, WorkerPid, Handler);
+                    loop_tcp(<<>>, Transport, Socket, WorkerPid, Handler, ProcessingPid);
                 List ->
-                    ok = create_resp(List, Transport, Socket, WorkerPid, Handler),
-                    loop_tcp(<<>>, Transport, Socket, WorkerPid, Handler)
+                    ok = create_resp(List, Transport, Socket, WorkerPid, Handler, ProcessingPid),
+                    loop_tcp(<<>>, Transport, Socket, WorkerPid, Handler, ProcessingPid)
             catch
                 _Class:Reason ->
                     case byte_size(Bin)>1535 of
@@ -240,7 +243,7 @@ loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler) ->
                             Handler:decoder_error(WorkerPid, Bin),                        
                             WorkerPid ! {terminate, Reason};
                         false ->
-                            loop_tcp(<<Buffer/bitstring, Bin/bitstring>>, Transport, Socket, WorkerPid, Handler)
+                            loop_tcp(<<Buffer/bitstring, Bin/bitstring>>, Transport, Socket, WorkerPid, Handler, ProcessingPid)
                     end
             end;
         {error, closed} ->
@@ -251,11 +254,11 @@ loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler) ->
             WorkerPid ! {terminate, Reason}
     end.              
 
-create_resp([], _Transport, _Socket, _WorkerPid, _Handler) ->
+create_resp([], _Transport, _Socket, _WorkerPid, _Handler, _ProcessingPid) ->
     ok;
-create_resp([H|T], Transport, Socket, WorkerPid, Handler) ->
+create_resp([H|T], Transport, Socket, WorkerPid, Handler, ProcessingPid) ->
 	{Name, Code, SeqNum, List} = H,
-    Resp = assemble_resp({Name, Code, SeqNum, List}, Socket, WorkerPid, Handler),
+    Resp = assemble_resp({Name, Code, SeqNum, List}, Socket, WorkerPid, Handler, ProcessingPid),
     case Resp of
         ok ->
             ok;
@@ -265,9 +268,9 @@ create_resp([H|T], Transport, Socket, WorkerPid, Handler) ->
         _ ->
             ok = try_send(Transport, Socket, Resp, WorkerPid, Handler)
     end,
-    create_resp(T, Transport, Socket, WorkerPid, Handler).  
+    create_resp(T, Transport, Socket, WorkerPid, Handler, ProcessingPid).  
 
-assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler) ->
+assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler, ProcessingPid) ->
     case Name of
         enquire_link -> 
             esmpp_lib_encoder:encode(enquire_link_resp, [], [{sequence_number, SeqNum}]);
@@ -278,9 +281,11 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler) ->
             ok = Handler:deliver_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         submit_sm_resp ->
-            ok = esmpp_lib_submit_processing:processing_submit(Handler, List, SeqNum, submit_sm_resp_handler, Status); 
+            ProcessingPid ! {processing_submit, Handler, List, SeqNum, submit_sm_resp_handler, Status},
+            ok; 
         data_sm_resp ->
-            ok = esmpp_lib_submit_processing:processing_submit(Handler, List, SeqNum, data_sm_resp_handler, Status); 
+            ProcessingPid ! {processing_submit, Handler, List, SeqNum, data_sm_resp_handler, Status},
+            ok; 
         data_sm ->                                                                                  
             MsgId = proplists:get_value(receipted_message_id, List),
             ok = Handler:data_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),

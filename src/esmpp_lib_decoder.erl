@@ -168,7 +168,7 @@ data_sm_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
             List = get_tag(Opt, []),
             {data_sm_resp, Status, SeqNum, [{message_id, MsgId}|List]};
         false ->
-            {submit_sm_resp, Status, SeqNum, []}
+            {data_sm_resp, Status, SeqNum, []}
     end.  
 
 query_sm_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) -> 
@@ -178,7 +178,7 @@ query_sm_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
             <<MsgState:8/integer, ErrCode:8/integer>> = binary:part(Rest,{byte_size(Rest), - 2}),     
             {query_sm_resp, Status, SeqNum, [{message_id, MsgId}, {message_state, MsgState}, {error_code, ErrCode}]};
         false ->
-            {submit_sm_resp, Status, SeqNum, []}
+            {query_sm_resp, Status, SeqNum, []}
     end.  
     
 unbind(<<0:32/integer, SeqNum:32/integer>>) ->

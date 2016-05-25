@@ -12,7 +12,7 @@
 %% ------------------------------------------------------------------
 
 -export([start_link/1]).
--export([processing_submit/5, add_submit/1, delete_submit/2]).
+-export([delete_submit/2]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -26,13 +26,8 @@
 %% ------------------------------------------------------------------
 
 start_link(State) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, State, []).
+    gen_server:start_link(?MODULE, State, []).
 
-processing_submit(Handler, List, SeqNum, OperationHandler, Status) ->
-    ok = gen_server:cast(?MODULE, {processing_submit, Handler, List, SeqNum, OperationHandler, Status}).
-
-add_submit({SeqNum, {Handler, Ts, Socket}}) ->
-    ok = gen_server:cast(?MODULE, {update_state, {add_submit, {SeqNum, {Handler, Ts, Socket}}}}).
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -45,24 +40,25 @@ init(State) ->
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
-handle_cast({processing_submit, Handler, List, 
-                                SeqNum, OperationHandler, Status}, State) ->
-    WorkerPid = proplists:get_value(worker_pid, State),
-    ok = submit_handler(Handler, WorkerPid, List, SeqNum, OperationHandler, Status, State), 
-    {noreply, State}; 
-handle_cast({update_state, {add_submit, Value}}, State) ->
-    ListSubmit = proplists:get_value(submit_check, State),
-    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, [Value|ListSubmit]}),
-    {noreply, State1};
 handle_cast(Msg, State) ->
     ?LOG_DEBUG("Unknown cast msg ~p~n", [Msg]),
     {noreply, State}.
 
+handle_info({processing_submit, Handler, List, 
+                                SeqNum, OperationHandler, Status}, State) ->
+    WorkerPid = proplists:get_value(worker_pid, State),
+    ok = submit_handler(Handler, WorkerPid, List, SeqNum, OperationHandler, Status, State), 
+    {noreply, State}; 
+handle_info({update_state, {add_submit, Value}}, State) ->
+    ListSubmit = proplists:get_value(submit_check, State),
+    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, [Value|ListSubmit]}),
+    {noreply, State1};
 handle_info({exam_submit, SubmitTimeout}, State) ->
     OldTRef = proplists:get_value(submit_tref, State),
     {ok, cancel} = timer:cancel(OldTRef),
     ListSubmit = proplists:get_value(submit_check, State),
-    ok = exam_submit(SubmitTimeout, State, ListSubmit, []),
+    TsNow = os:timestamp(),
+    ok = exam_submit(SubmitTimeout, TsNow, State, ListSubmit, []),
     {ok, NewTRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
     State1 = lists:keyreplace(submit_tref, 1, State, {submit_tref, NewTRef}),
     {noreply, State1};
@@ -96,18 +92,16 @@ submit_handler(Handler, WorkerPid, List, SeqNum, OperationHandler, Status, State
             _ = spawn(?MODULE, delete_submit, [WorkerPid, SeqNum]),
             ok;
         false ->
-            Socket = proplists:get_value(socket, State),
-            ok = Handler:submit_error(WorkerPid, Socket, SeqNum)
+            ok = Handler:submit_error(WorkerPid, SeqNum)                               
     end.  
 
-exam_submit(_Timeout, State, [], Acc) ->
+exam_submit(_Timeout, _TsNow, State, [], Acc) ->
     WorkerPid = proplists:get_value(worker_pid, State),
     WorkerPid ! {update_state, {submit_check, Acc}},
     ok;
-exam_submit(Timeout, State, [H|T], Acc) ->
+exam_submit(Timeout, TsNow, State, [H|T], Acc) ->
     WorkerPid = proplists:get_value(worker_pid, State),
     Handler = proplists:get_value(handler, State),
-    TsNow = os:timestamp(),
     {Key, {Handler, TsOld, Socket}} = H,
     Acc1 = case timer:now_diff(TsNow, TsOld) > Timeout*1000000 of
         true ->
@@ -116,7 +110,7 @@ exam_submit(Timeout, State, [H|T], Acc) ->
         false ->
             [H|Acc]
     end,
-    exam_submit(Timeout, State, T, Acc1).
+    exam_submit(Timeout, TsNow, State, T, Acc1).
 
 delete_submit(WorkerPid, SeqNum) ->
     ok = timer:sleep(2000),
