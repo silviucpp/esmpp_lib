@@ -12,7 +12,7 @@
 %% ------------------------------------------------------------------
 
 -export([submit_sm_resp_handler/2, deliver_sm_handler/2, data_sm_handler/2, 
-            data_sm_resp_handler/2, query_sm_handler/2, unbind_handler/1,
+            data_sm_resp_handler/2, query_sm_resp_handler/2, unbind_handler/1,
             outbind_handler/2, submit_error/2, network_error/2, decoder_error/2]).
 
 
@@ -32,7 +32,7 @@ data_sm_handler(Pid, List) ->
 data_sm_resp_handler(Pid, List) ->
     ?LOG_INFO("Data_sm resp pid ~p msg: ~p~n", [Pid, List]).
 
-query_sm_handler(Pid, List) ->
+query_sm_resp_handler(Pid, List) ->
     ?LOG_INFO("Query resp pid ~p msg: ~p~n", [Pid, List]).
 
 unbind_handler(Pid) ->

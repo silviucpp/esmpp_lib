@@ -30,7 +30,7 @@
 -callback data_sm_handler(pid(), list()) -> ok.
 -callback data_sm_resp_handler(pid(), list()) -> ok.
 -callback deliver_sm_handler(pid(), list()) -> ok.
--callback query_sm_handler(pid(), list()) -> ok.
+-callback query_sm_resp_handler(pid(), list()) -> ok.
 -callback unbind_handler(pid()) -> ok.
 -callback outbind_handler(pid(), term()) -> ok.
 -callback network_error(pid(), term()) -> ok.
@@ -291,7 +291,7 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler, Processi
             ok = Handler:data_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         query_sm_resp ->
-            ok = Handler:query_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]);
+            ok = Handler:query_sm_resp_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]);
         alert_notification ->
             ok;
         outbind ->
