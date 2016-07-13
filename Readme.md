@@ -35,7 +35,7 @@ ok
 2> lager:start().
 ok
 3> {ok, Pid} = esmpp_lib_worker:start_link([{host, {127,0,0,1}}, 
-                    {port, 2775}, {password, <<"password">>}, 
+                    {port, 2775}, {password, <<"password">>}, {data_coding, 0},
                     {system_id, <<"smppclient1">>}, {interface_version, "3.4"}, 
                     {enquire_timeout, 30}, {submit_timeout, 60}, 
                     {system_type, ""}, {service_type, ""}, {addr_ton, 5}, 
@@ -45,7 +45,7 @@ ok
 
 {ok,<0.78.0>}
 4> 
-4> ok = esmpp_lib_worker:submit(Pid, [{source_addr, <<"Test">>}, {dest_addr, <<"380555222333">>}, {text, <<"Test sms">>}]).                                                          
+4> ok = esmpp_lib_worker:submit(Pid, [{source_addr, <<"Test">>}, {dest_addr, <<"380555222333">>}, {text, <<"Test sms">>}]).
 ok
 
 ```
@@ -76,6 +76,13 @@ Mandatory parameters include next things:
 * handler — your own module for handle smpp packet from SMSC, 
         example {handler, my_sms},
 * service_type (default {service_type, <<>>})
+* data_coding - you need to know what encoding is set to the channel
+on the operator side. When the application opens a session you must 
+transmitted value is the same as the encoding configured on the operator 
+side. Usually gsm encoding is installed (160 characters in one SMS message). 
+In this case, pass the {data_coding, 0} parameter. Sometimes latin1 
+encoding is installed (140 characters in one SMS). In this case, pass the 
+parameter {data_coding, 3}
 
 If correct parameters is present, connection to provider 
 to be able in two mode: 
