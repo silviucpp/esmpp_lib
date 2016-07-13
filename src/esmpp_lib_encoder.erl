@@ -49,7 +49,7 @@ encode(Name, Param, List) ->
 %% INTERNAL
 
 bind(ComId, Param) ->
-    SeqNum = proplists:get_value(seq_n, Param),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
     SysId = get_binary(system_id, Param),
     LenId = byte_size(SysId),
     SysType = get_binary(system_type, Param),
@@ -57,17 +57,17 @@ bind(ComId, Param) ->
     Pass = get_binary(password, Param),
     LenP = byte_size(Pass),
     IVer = get_binary(interface_version, Param),
-    IfaceVer = convert_smpp_version(IVer),  
-    AddrTon = proplists:get_value(addr_ton, Param),
-    AddrNpi = proplists:get_value(addr_npi, Param),
+    IfaceVer = convert_smpp_version(IVer),
+    AddrTon = esmpp_utils:lookup(addr_ton, Param),
+    AddrNpi = esmpp_utils:lookup(addr_npi, Param),
     Bin = ?BIND(1234, ComId, SeqNum, SysId, LenId, Pass, LenP, SysType, LenT,
                             IfaceVer, AddrTon, AddrNpi, 0, 8),
     Length = byte_size(Bin),
-    ?BIND(Length, ComId, SeqNum, SysId, LenId, Pass, LenP, SysType, LenT, IfaceVer, 
+    ?BIND(Length, ComId, SeqNum, SysId, LenId, Pass, LenP, SysType, LenT, IfaceVer,
                     AddrTon, AddrNpi, 0, 8).
 
 unbind(Param) ->
-    SeqNum = proplists:get_value(seq_n, Param),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
     ?UNBIND(SeqNum).
 
 unbind_resp([{sequence_number, SeqNum}]) ->
@@ -75,13 +75,13 @@ unbind_resp([{sequence_number, SeqNum}]) ->
 
 %% TODO 
 generic_nack(List) ->
-    SeqNum = proplists:get_value(sequence_number, List),
-    ErrCode = proplists:get_value(status, List),
+    SeqNum = esmpp_utils:lookup(sequence_number, List),
+    ErrCode = esmpp_utils:lookup(status, List),
     ?GENERIC_NACK(SeqNum, ErrCode).
 
-submit_sm(List, Param) -> 
+submit_sm(List, Param) ->
     Txt = get_binary(text, List),
-    SeqNum = proplists:get_value(seq_n, Param),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
     Daddr = get_binary(dest_addr, List),
     Saddr = get_binary(source_addr, List),
     {Encode, MaxLen} = exam_unicode(Txt, Param),
@@ -93,10 +93,10 @@ submit_sm(List, Param) ->
             LenType = byte_size(ServType),
             LenDaddr = byte_size(Daddr),
             LenSaddr = byte_size(Saddr),
-            SaddrTon = proplists:get_value(source_addr_ton, Param),
-            SaddrNpi = proplists:get_value(source_addr_npi, Param),
-            DaddrTon = proplists:get_value(dest_addr_ton, Param),
-            DaddrNpi = proplists:get_value(dest_addr_npi, Param),
+            SaddrTon = esmpp_utils:lookup(source_addr_ton, Param),
+            SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
+            DaddrTon = esmpp_utils:lookup(dest_addr_ton, Param),
+            DaddrNpi = esmpp_utils:lookup(dest_addr_npi, Param),
             Bin = ?SUBMIT_SM(1234, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                         Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr,
                         Encode, LenTxt, Text),
@@ -113,20 +113,20 @@ submit_sm(List, Param) ->
 
 data_sm(List, Param) -> 
     Daddr = get_binary(dest_addr, List),
-    Txt = proplists:get_value(text, List),
+    Txt = esmpp_utils:lookup(text, List),
     {Encode, _} = exam_unicode(Txt, Param),
     Text = get_text_by_code(Encode, Txt),
     LenTxt = byte_size(Text),
-    SeqNum = proplists:get_value(seq_n, Param),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
     ServType = get_binary(service_type, Param),
     LenType = byte_size(ServType),
     LenDaddr = byte_size(Daddr),
     Saddr = get_binary(source_addr, List),
     LenSaddr = byte_size(Saddr),
-    SaddrTon = proplists:get_value(source_addr_ton, Param),
-    SaddrNpi = proplists:get_value(source_addr_npi, Param),
-    DaddrTon = proplists:get_value(dest_addr_ton, Param),
-    DaddrNpi = proplists:get_value(dest_addr_npi, Param),
+    SaddrTon = esmpp_utils:lookup(source_addr_ton, Param),
+    SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
+    DaddrTon = esmpp_utils:lookup(dest_addr_ton, Param),
+    DaddrNpi = esmpp_utils:lookup(dest_addr_npi, Param),
     Bin = ?DATA_SM(1234, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                     Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr, Encode, Text, LenTxt),
     Length = byte_size(Bin),
@@ -134,29 +134,29 @@ data_sm(List, Param) ->
                  Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr, Encode, Text, LenTxt).
 
 data_sm_resp(List) ->    
-    SeqNum = proplists:get_value(sequence_number, List),
-    Status = proplists:get_value(status, List),
-    MsgId = proplists:get_value(message_id, List),
+    SeqNum = esmpp_utils:lookup(sequence_number, List),
+    Status = esmpp_utils:lookup(status, List),
+    MsgId = esmpp_utils:lookup(message_id, List),
     LenId = byte_size(MsgId),
     Bin = ?DATA_SM_RESP(1234, Status, SeqNum, MsgId, LenId),
     Length = byte_size(Bin),
     ?DATA_SM_RESP(Length, Status, SeqNum, MsgId, LenId).
 
 deliver_sm_resp(List) -> 
-    SeqNum = proplists:get_value(sequence_number, List),
-    Status = proplists:get_value(status, List),
+    SeqNum = esmpp_utils:lookup(sequence_number, List),
+    Status = esmpp_utils:lookup(status, List),
     Bin = ?DELIVER_SM_RESP(1234, Status, SeqNum),
     Length = byte_size(Bin),
     ?DELIVER_SM_RESP(Length, Status, SeqNum).
 
 query_sm(List, Param) ->
-    SeqNum = proplists:get_value(seq_n, Param),
-    MsgId = proplists:get_value(message_id, List),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
+    MsgId = esmpp_utils:lookup(message_id, List),
     Len = byte_size(MsgId),
     Saddr = get_binary(source_addr, List),
     LenSaddr = byte_size(Saddr),
-    SaddrTon = proplists:get_value(source_addr_ton, Param),
-    SaddrNpi = proplists:get_value(source_addr_npi, Param),
+    SaddrTon = esmpp_utils:lookup(source_addr_ton, Param),
+    SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
     Bin = ?QUERY_SM(1234, SeqNum, MsgId, Len, SaddrTon, 
             SaddrNpi, Saddr, LenSaddr),
     Length = byte_size(Bin),
@@ -164,23 +164,23 @@ query_sm(List, Param) ->
             SaddrNpi, Saddr, LenSaddr).
 
 enquire_link(Param) ->    
-    SeqNum = proplists:get_value(seq_n, Param),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
     ?ENQUIRE_LINK(SeqNum).
 
 enquire_link_resp(List) ->
-    SeqNum = proplists:get_value(sequence_number, List),
+    SeqNum = esmpp_utils:lookup(sequence_number, List),
     ?ENQUIRE_LINK_RESP(SeqNum).
 
 cancel_sm(List, Param) ->
-    SeqNum = proplists:get_value(seq_n, Param),
-    MsgId = proplists:get_value(message_id, List),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
+    MsgId = esmpp_utils:lookup(message_id, List),
     LenId = byte_size(MsgId),
     Saddr = get_binary(source_addr, List),
     LenSaddr = byte_size(Saddr),
-    SaddrTon = proplists:get_value(source_addr_ton, Param),
-    SaddrNpi = proplists:get_value(source_addr_npi, Param),
-    DaddrTon = proplists:get_value(dest_addr_ton, Param),
-    DaddrNpi = proplists:get_value(dest_addr_npi, Param),
+    SaddrTon = esmpp_utils:lookup(source_addr_ton, Param),
+    SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
+    DaddrTon = esmpp_utils:lookup(dest_addr_ton, Param),
+    DaddrNpi = esmpp_utils:lookup(dest_addr_npi, Param),
     Daddr = get_binary(dest_addr, List),
     LenDaddr = byte_size(Daddr),
     Bin = ?CANCEL_SM(1234, SeqNum, MsgId, LenId, SaddrTon, SaddrNpi, Saddr, 
@@ -190,13 +190,13 @@ cancel_sm(List, Param) ->
                 LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr).
 
 replace_sm(List, Param) ->
-    SeqNum = proplists:get_value(seq_n, Param),
-    MsgId = proplists:get_value(message_id, List),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
+    MsgId = esmpp_utils:lookup(message_id, List),
     LenId = byte_size(MsgId),
     Saddr = get_binary(source_addr, List),
     LenS = byte_size(Saddr),
-    SaddrTon = proplists:get_value(source_addr_ton, Param),
-    SaddrNpi = proplists:get_value(source_addr_npi, Param),
+    SaddrTon = esmpp_utils:lookup(source_addr_ton, Param),
+    SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
     Txt = get_binary(text, List),
     LenTxt = byte_size(Txt),
     Bin = ?REPLACE_SM(1234, SeqNum, MsgId, LenId, SaddrTon, SaddrNpi, 
@@ -210,7 +210,7 @@ assemble_submit({_SarTotSeg, []}, _SarRefNum, _List, _Param, _Encode, Acc) ->
 assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
     {SarSegNum, Chunk} = H,
     Daddr = get_binary(dest_addr, List),
-    SeqNum = proplists:get_value(seq_n, Param),
+    SeqNum = esmpp_utils:lookup(seq_n, Param),
     ServType = get_binary(service_type, Param),
     LenType = byte_size(ServType),
     LenDaddr = byte_size(Daddr),
@@ -218,10 +218,10 @@ assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
     LenMsg = LenChunk+6,
     Saddr = get_binary(source_addr, List),
     LenSaddr = byte_size(Saddr),
-    SaddrTon = proplists:get_value(source_addr_ton, Param),
-    SaddrNpi = proplists:get_value(source_addr_npi, Param),
-    DaddrTon = proplists:get_value(dest_addr_ton, Param),
-    DaddrNpi = proplists:get_value(dest_addr_npi, Param),
+    SaddrTon = esmpp_utils:lookup(source_addr_ton, Param),
+    SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
+    DaddrTon = esmpp_utils:lookup(dest_addr_ton, Param),
+    DaddrNpi = esmpp_utils:lookup(dest_addr_npi, Param),
     Bin = ?SUBMIT_SM_CUT(1234, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                 Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr,
                 Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg),
@@ -229,7 +229,7 @@ assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
     Bin1 = ?SUBMIT_SM_CUT(Length, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                     Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr,
                     Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg),
-    Param1 = lists:keyreplace(seq_n, 1, Param, {seq_n, SeqNum+1}),
+    Param1 = esmpp_utils:replace(seq_n, SeqNum + 1, Param),
     assemble_submit({SarTotSeg, T}, SarRefNum, List, Param1, Encode, [Bin1|Acc]).
 
 get_text_by_code(Encode, Bin) ->
@@ -249,7 +249,7 @@ exam_unicode(Bin, Param) ->
         true ->
 	        {8, 140};
         false ->
-            Num = proplists:get_value(data_coding, Param),
+            Num = esmpp_utils:lookup(data_coding, Param),
             case Num of 
                 undefined -> {0, 160};
 	            0 -> {0, 160};
@@ -279,8 +279,8 @@ convert_smpp_version(Param) ->
     end.         
 
 sar_ref_num(Param) ->
-    Sar = proplists:get_value(sar, Param),
-    WorkerPid = proplists:get_value(worker_pid, Param),
+    Sar = esmpp_utils:lookup(sar, Param),
+    WorkerPid = esmpp_utils:lookup(worker_pid, Param),
     case Sar of
 	 255->
         WorkerPid ! {update_state, {sar, 0}},
@@ -307,7 +307,7 @@ cut_txt(Text, Num, MaxLen, Acc) ->
 
 
 get_binary(Name, List) ->
-    Param = proplists:get_value(Name, List),
+    Param = esmpp_utils:lookup(Name, List),
     case is_integer(Param) of
         true -> 
             Param;

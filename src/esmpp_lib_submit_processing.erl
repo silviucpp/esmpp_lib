@@ -1,42 +1,36 @@
 -module(esmpp_lib_submit_processing).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
--behaviour(gen_server).
-
 -include("esmpp_lib.hrl").
 
+-behaviour(gen_server).
+
 -define(SERVER, ?MODULE).
+-define(DEFAULT_TIMEOUT, 39).
 
-%% ------------------------------------------------------------------
-%% API Function Exports
-%% ------------------------------------------------------------------
-
--export([start_link/1]).
--export([delete_submit/2]).
-
-%% ------------------------------------------------------------------
-%% gen_server Function Exports
-%% ------------------------------------------------------------------
-
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
-
-%% ------------------------------------------------------------------
-%% API Function Definitions
-%% ------------------------------------------------------------------
+-export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([processing_submit/6, push_submit/2]).
 
 start_link(State) ->
     gen_server:start_link(?MODULE, State, []).
 
-%% ------------------------------------------------------------------
-%% gen_server Function Definitions
-%% ------------------------------------------------------------------
+-record(state, {
+    submit_check,
+    submit_tref,
+    handler
+}).
 
-init(State) ->
-    WorkerPid = self(),
-    SubmitTimeout = get_timeout(submit_timeout, State),
+processing_submit(Pid, Handler, List, SeqNum, OperationHandler, Status) ->
+    Pid ! {processing_submit, Handler, List, SeqNum, OperationHandler, Status}.
+
+push_submit(Pid, Value) ->
+    Pid ! {push_submit, Value}.
+
+init(Opt) ->
+    SubmitTimeout = get_timeout(submit_timeout, Opt),
+    Handler = esmpp_utils:lookup(handler, Opt),
     {ok, TRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
-    {ok, [{submit_check, []}, {worker_pid, WorkerPid}, {submit_tref, TRef}|State]}.
+    {ok, #state{submit_check = [], submit_tref = TRef, handler = Handler}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -44,31 +38,23 @@ handle_cast(Msg, State) ->
     ?LOG_DEBUG("Unknown cast msg ~p~n", [Msg]),
     {noreply, State}.
 
-handle_info({processing_submit, Handler, List, 
-                                SeqNum, OperationHandler, Status}, State) ->
-    WorkerPid = proplists:get_value(worker_pid, State),
-    ok = submit_handler(Handler, WorkerPid, List, SeqNum, OperationHandler, Status, State), 
-    {noreply, State}; 
-handle_info({update_state, {add_submit, Value}}, State) ->
-    ListSubmit = proplists:get_value(submit_check, State),
-    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, [Value|ListSubmit]}),
-    {noreply, State1};
+handle_info({processing_submit, Handler, List, SeqNum, OperationHandler, Status}, State) ->
+    NewSubmitCheck = case is_tuple(esmpp_utils:lookup(SeqNum, State#state.submit_check)) of
+        true ->
+            ok = Handler:OperationHandler(self(), [{sequence_number, SeqNum}, {command_status, Status} | List]),
+            esmpp_utils:delete(SeqNum, State#state.submit_check);
+        false ->
+            ok = Handler:submit_error(self(), SeqNum),
+            State#state.submit_check
+    end,
+    {noreply, State#state{submit_check = NewSubmitCheck}};
+handle_info({push_submit, Value}, State) ->
+    {noreply, State#state{submit_check = [Value | State#state.submit_check]}};
 handle_info({exam_submit, SubmitTimeout}, State) ->
-    OldTRef = proplists:get_value(submit_tref, State),
-    {ok, cancel} = timer:cancel(OldTRef),
-    ListSubmit = proplists:get_value(submit_check, State),
-    TsNow = os:timestamp(),
-    ok = exam_submit(SubmitTimeout, TsNow, State, ListSubmit, []),
+    {ok, cancel} = timer:cancel(State#state.submit_tref),
+    NewSubmitCheck = exam_submit(SubmitTimeout, os:timestamp(), State),
     {ok, NewTRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
-    State1 = lists:keyreplace(submit_tref, 1, State, {submit_tref, NewTRef}),
-    {noreply, State1};
-handle_info({update_state, {submit_check, Acc}}, State) ->
-    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, Acc}),
-    {noreply, State1};
-handle_info({update_state, {delete_submit, SeqNum}}, State) ->
-    ListSubmit = proplists:delete(SeqNum, proplists:get_value(submit_check, State)),
-    State1 = lists:keyreplace(submit_check, 1, State, {submit_check, ListSubmit}),
-    {noreply, State1};
+    {noreply, State#state{submit_tref = NewTRef, submit_check = NewSubmitCheck}};
 handle_info(Info, State) ->
     ?LOG_DEBUG("Unknown info msg ~p~n", [Info]),
     {noreply, State}.
@@ -79,48 +65,29 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% ------------------------------------------------------------------
 %% Internal Function Definitions
-%% ------------------------------------------------------------------
 
-submit_handler(Handler, WorkerPid, List, SeqNum, OperationHandler, Status, State) ->
-    ListSubmit = proplists:get_value(submit_check, State),
-    case is_tuple(proplists:get_value(SeqNum, ListSubmit)) of
-        true ->
-            ok = Handler:OperationHandler(WorkerPid, [{sequence_number, SeqNum},
-                        {command_status, Status}|List]),
-            _ = spawn(?MODULE, delete_submit, [WorkerPid, SeqNum]),
-            ok;
-        false ->
-            ok = Handler:submit_error(WorkerPid, SeqNum)                               
-    end.  
+exam_submit(SubmitTimeout, TsNow, State) ->
+    exam_submit(SubmitTimeout, TsNow, State#state.handler, State#state.submit_check, []).
 
-exam_submit(_Timeout, _TsNow, State, [], Acc) ->
-    WorkerPid = proplists:get_value(worker_pid, State),
-    WorkerPid ! {update_state, {submit_check, Acc}},
-    ok;
-exam_submit(Timeout, TsNow, State, [H|T], Acc) ->
-    WorkerPid = proplists:get_value(worker_pid, State),
-    Handler = proplists:get_value(handler, State),
+exam_submit(_Timeout, _TsNow, _Handler, [], Acc) ->
+    Acc;
+exam_submit(Timeout, TsNow, Handler, [H|T], Acc) ->
+
     {Key, {Handler, TsOld, Socket}} = H,
     Acc1 = case timer:now_diff(TsNow, TsOld) > Timeout*1000000 of
         true ->
-            ok = Handler:submit_error(WorkerPid, Socket, Key),
+            ok = Handler:submit_error(self(), Socket, Key),
             Acc;
         false ->
             [H|Acc]
     end,
-    exam_submit(Timeout, TsNow, State, T, Acc1).
-
-delete_submit(WorkerPid, SeqNum) ->
-    ok = timer:sleep(2000),
-    WorkerPid ! {update_state, {delete_submit, SeqNum}}.
+    exam_submit(Timeout, TsNow, Handler, T, Acc1).
 
 get_timeout(Key, Param) ->
-    Value = proplists:get_value(Key, Param),
-    case is_integer(Value) of 
-        true ->
+    case esmpp_utils:lookup(Key, Param) of
+        Value when is_integer(Value) ->
             Value;
         false ->
-            39
+            ?DEFAULT_TIMEOUT
     end.

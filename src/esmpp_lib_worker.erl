@@ -6,25 +6,10 @@
 
 -include("esmpp_lib.hrl").
 
-%% ------------------------------------------------------------------
-%% API Function Exports
-%% ------------------------------------------------------------------
+-export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2, replace_sm/2]).
 
--export([start_link/1]).
--export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2,
-         replace_sm/2]).
--export([loop_tcp/6, enquire_link/1]).
-
-%% ------------------------------------------------------------------
-%% gen_server Function Exports
-%% ------------------------------------------------------------------
-
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
-
-%% ------------------------------------------------------------------
 %% Callback Function Definitions
-%% ------------------------------------------------------------------
 
 -callback submit_sm_resp_handler(pid(), list()) -> ok.
 -callback data_sm_handler(pid(), list()) -> ok.
@@ -37,13 +22,10 @@
 -callback decoder_error(pid(), term()) -> ok.
 -callback submit_error(pid(), term()) -> ok.
 
-%% ------------------------------------------------------------------
 %% API Function Definitions
-%% ------------------------------------------------------------------
 
 start_link(Param) ->
     gen_server:start_link(?MODULE, Param, []).
-
 
 -spec submit(pid(), list()) -> ok.
 submit(WorkerPid, List) ->
@@ -75,17 +57,13 @@ unbind(WorkerPid) ->
     gen_server:cast(WorkerPid, {unbind, []}),
     ?LOG_INFO("Send msg unbind for pid ~p~n ", [WorkerPid]).
 
-%% ------------------------------------------------------------------
 %% gen_server Function Definitions
-%% ------------------------------------------------------------------
 
 init(Param) ->
-    Mode = proplists:get_value(mode, Param),
-    {ok, _} = timer:send_after(10, {bind, Mode}),
-    WorkerPid = self(),
-    {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link([{parent_pid, WorkerPid}|Param]),
-    Param1 = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid}|Param],            
-    {ok, Param1}.
+    {ok, _} = timer:send_after(10, {bind, esmpp_utils:lookup(mode, Param)}),
+    {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link(Param),
+    State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, self()} | Param],
+    {ok,  State}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -96,25 +74,25 @@ handle_cast({submit, List}, State) ->
     {noreply, State1}; 
 handle_cast({query_sm, List}, State) ->
     Transport = get_transport(State),
-    Handler = proplists:get_value(handler, State),
-    WorkerPid = proplists:get_value(worker_pid, State),
-    Socket = proplists:get_value(socket, State),  
+    Handler = esmpp_utils:lookup(handler, State),
+    WorkerPid = esmpp_utils:lookup(worker_pid, State),
+    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(query_sm, State, List),
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     {noreply, accumulate_seq_num(State)}; 
 handle_cast({replace_sm, List}, State) ->
     Transport = get_transport(State),
-    Handler = proplists:get_value(handler, State),
-    WorkerPid = proplists:get_value(worker_pid, State),
-    Socket = proplists:get_value(socket, State),  
+    Handler = esmpp_utils:lookup(handler, State),
+    WorkerPid = esmpp_utils:lookup(worker_pid, State),
+    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(replace_sm, State, List),
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     {noreply, accumulate_seq_num(State)}; 
 handle_cast({cancel_sm, List}, State) ->
-    Handler = proplists:get_value(handler, State),
-    WorkerPid = proplists:get_value(worker_pid, State),
+    Handler = esmpp_utils:lookup(handler, State),
+    WorkerPid = esmpp_utils:lookup(worker_pid, State),
     Transport = get_transport(State),
-    Socket = proplists:get_value(socket, State),  
+    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(cancel_sm, State, List),
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     {noreply, accumulate_seq_num(State)}; 
@@ -124,9 +102,9 @@ handle_cast({data_sm, List}, State) ->
     {noreply, State1}; 
 handle_cast({unbind, []}, State) ->
     Transport = get_transport(State),
-    Handler = proplists:get_value(handler, State),
-    WorkerPid = proplists:get_value(worker_pid, State),
-    Socket = proplists:get_value(socket, State),
+    Handler = esmpp_utils:lookup(handler, State),
+    WorkerPid = esmpp_utils:lookup(worker_pid, State),
+    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(unbind, State),
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     ok = Handler:unbind_handler(WorkerPid),
@@ -137,9 +115,9 @@ handle_cast(_Msg, State) ->
 
 handle_info({bind, Mode}, Param) ->
     Transport = get_transport(Param),
-    WorkerPid = proplists:get_value(worker_pid, Param),
-    ProcessingPid = proplists:get_value(processing_pid, Param),
-    Handler = proplists:get_value(handler, Param),
+    WorkerPid = esmpp_utils:lookup(worker_pid, Param),
+    ProcessingPid = esmpp_utils:lookup(processing_pid, Param),
+    Handler = esmpp_utils:lookup(handler, Param),
     State1 = case bind(Mode, Param) of
         {error, Reason} ->
             ok = Handler:network_error(WorkerPid, Reason),
@@ -147,19 +125,18 @@ handle_info({bind, Mode}, Param) ->
             Param;
         Socket ->
             Param1 = accumulate_seq_num([{socket, Socket}|Param]),
-            ListenPid = spawn_link(?MODULE, loop_tcp, [<<>>, Transport, Socket, WorkerPid, Handler, ProcessingPid]),
-            case proplists:get_value(enquire_timeout, Param1) of
+            ListenPid = spawn_link(fun() -> loop_tcp(<<>>, Transport, Socket, WorkerPid, Handler, ProcessingPid) end),
+            case esmpp_utils:lookup(enquire_timeout, Param1) of
                 undefined ->
                     ok;
                 _ ->
-                    _ = spawn_link(?MODULE, enquire_link, [Param1])
+                    spawn_link(fun() -> enquire_link(Param1) end)
             end,
             [{mode, Mode},{listen_pid, ListenPid}|Param1]
     end,
     {noreply, State1};
 handle_info({update_state, {Name, NewEntry}}, State) ->
-    State1 = lists:keyreplace(Name, 1, State, {Name, NewEntry}),
-    {noreply, State1};
+    {noreply, esmpp_utils:replace(Name, NewEntry, State)};
 handle_info({get_state, ListenPid}, State) ->
     ListenPid ! {state, State},
     {noreply, State};
@@ -176,9 +153,7 @@ terminate(Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% ------------------------------------------------------------------
 %% Internal Function Definitions
-%% ------------------------------------------------------------------
 
 bind(Mode, Param) ->
     Transport = get_transport(Param),
@@ -199,8 +174,8 @@ bind(Mode, Param) ->
 
 connect(Param) ->
     Transport = get_transport(Param),
-    Ip = proplists:get_value(host, Param),
-    Port = proplists:get_value(port, Param),
+    Ip = esmpp_utils:lookup(host, Param),
+    Port = esmpp_utils:lookup(port, Param),
     _ = Transport:connect(Ip, Port, [binary, {active, false},
                         {keepalive, true}, {reuseaddr, true}, {packet, 0}], 2000).
 
@@ -216,14 +191,13 @@ send_sms([], State) ->
     State;
 send_sms([Bin|T], State) ->
     Transport = get_transport(State),
-    WorkerPid = proplists:get_value(worker_pid, State),
-    ProcessingPid = proplists:get_value(processing_pid, State),
-    Socket = proplists:get_value(socket, State),
-    Handler = proplists:get_value(handler, State),
+    WorkerPid = esmpp_utils:lookup(worker_pid, State),
+    ProcessingPid = esmpp_utils:lookup(processing_pid, State),
+    Socket = esmpp_utils:lookup(socket, State),
+    Handler = esmpp_utils:lookup(handler, State),
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
-    Ts = os:timestamp(),
-    ProcessingPid ! {update_state, {add_submit, {SeqNum, {Handler, Ts, Socket}}}},
+    esmpp_lib_submit_processing:push_submit(ProcessingPid, {SeqNum, {Handler, os:timestamp(), Socket}}),
     send_sms(T, accumulate_seq_num(State)).
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler, ProcessingPid) ->
@@ -277,17 +251,17 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, Handler, Processi
         enquire_link_resp ->
             ok; 
         deliver_sm -> 
-            MsgId = proplists:get_value(receipted_message_id, List),
+            MsgId = esmpp_utils:lookup(receipted_message_id, List),
             ok = Handler:deliver_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         submit_sm_resp ->
-            ProcessingPid ! {processing_submit, Handler, List, SeqNum, submit_sm_resp_handler, Status},
-            ok; 
+            esmpp_lib_submit_processing:processing_submit(ProcessingPid, Handler, List, SeqNum, submit_sm_resp_handler, Status),
+            ok;
         data_sm_resp ->
-            ProcessingPid ! {processing_submit, Handler, List, SeqNum, data_sm_resp_handler, Status},
+            esmpp_lib_submit_processing:processing_submit(ProcessingPid, Handler, List, SeqNum, data_sm_resp_handler, Status),
             ok; 
         data_sm ->                                                                                  
-            MsgId = proplists:get_value(receipted_message_id, List),
+            MsgId = esmpp_utils:lookup(receipted_message_id, List),
             ok = Handler:data_sm_handler(WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]),
             esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         query_sm_resp ->
@@ -325,32 +299,32 @@ exam_bind_resp(Socket, Transport) ->
     end.
 
 enquire_link(State) ->
-    EnquireTimeout = proplists:get_value(enquire_timeout, State)*1000,
+    EnquireTimeout = esmpp_utils:lookup(enquire_timeout, State)*1000,
     ok = timer:sleep(EnquireTimeout),
     Transport = get_transport(State),
-    Socket = proplists:get_value(socket, State),
-    WorkerPid = proplists:get_value(worker_pid, State),
-    Handler = proplists:get_value(handler, State),
+    Socket = esmpp_utils:lookup(socket, State),
+    WorkerPid = esmpp_utils:lookup(worker_pid, State),
+    Handler = esmpp_utils:lookup(handler, State),
     Bin = esmpp_lib_encoder:encode(enquire_link, State),
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
     enquire_link(accumulate_seq_num(State)).                       
     
 get_transport(Param) ->
-    case proplists:get_value(transport, Param) of 
+    case esmpp_utils:lookup(transport, Param) of
         tcp -> gen_tcp;
         undefined -> gen_tcp;
         ssl -> ssl
     end.
      
 accumulate_seq_num(State) ->
-    SeqNum = proplists:get_value(seq_n, State),
-    Value = case SeqNum of 
+    Value = case esmpp_utils:lookup(seq_n, State) of
         999999 ->
             1;
         SeqNum ->
             SeqNum + 1
     end,
-    lists:keyreplace(seq_n, 1, State, {seq_n, Value}).
+
+    esmpp_utils:replace(seq_n, Value, State).
      
 try_send(Transport, Socket, Bin, WorkerPid, Handler) -> 
     case Transport:send(Socket, Bin) of
