@@ -17,7 +17,8 @@ start_link(State) ->
 -record(state, {
     submit_check,
     submit_tref,
-    handler
+    handler,
+    parent_pid
 }).
 
 processing_submit(Pid, Handler, List, SeqNum, OperationHandler, Status) ->
@@ -29,8 +30,10 @@ push_submit(Pid, Value) ->
 init(Opt) ->
     SubmitTimeout = get_timeout(submit_timeout, Opt),
     Handler = esmpp_utils:lookup(handler, Opt),
+    ParentPid = esmpp_utils:lookup(parent_pid, Opt),
+
     {ok, TRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
-    {ok, #state{submit_check = [], submit_tref = TRef, handler = Handler}}.
+    {ok, #state{submit_check = [], submit_tref = TRef, handler = Handler, parent_pid = ParentPid}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -41,10 +44,12 @@ handle_cast(Msg, State) ->
 handle_info({processing_submit, Handler, List, SeqNum, OperationHandler, Status}, State) ->
     NewSubmitCheck = case is_tuple(esmpp_utils:lookup(SeqNum, State#state.submit_check)) of
         true ->
-            ok = Handler:OperationHandler(self(), [{sequence_number, SeqNum}, {command_status, Status} | List]),
+            ok = Handler:OperationHandler(State#state.parent_pid, [{sequence_number, SeqNum}, {command_status, Status} | List]),
             esmpp_utils:delete(SeqNum, State#state.submit_check);
-        false ->
-            ok = Handler:submit_error(self(), SeqNum),
+        _ ->
+            %most probably the message was already removed because was not acknowledged in the submit_timeout timeframe
+            ?LOG_ERROR("received processing_submit for unknown seq_number: ~p", [SeqNum]),
+            ok = Handler:submit_error(State#state.parent_pid, SeqNum),
             State#state.submit_check
     end,
     {noreply, State#state{submit_check = NewSubmitCheck}};
@@ -68,21 +73,21 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal Function Definitions
 
 exam_submit(SubmitTimeout, TsNow, State) ->
-    exam_submit(SubmitTimeout, TsNow, State#state.handler, State#state.submit_check, []).
+    exam_submit(SubmitTimeout, TsNow, State#state.parent_pid, State#state.handler, State#state.submit_check, []).
 
-exam_submit(_Timeout, _TsNow, _Handler, [], Acc) ->
+exam_submit(_Timeout, _TsNow, _ParentPid,  _Handler, [], Acc) ->
     Acc;
-exam_submit(Timeout, TsNow, Handler, [H|T], Acc) ->
+exam_submit(Timeout, TsNow, ParentPid, Handler, [H|T], Acc) ->
 
-    {Key, {Handler, TsOld, Socket}} = H,
+    {Key, {Handler, TsOld, _Socket}} = H,
     Acc1 = case timer:now_diff(TsNow, TsOld) > Timeout*1000000 of
         true ->
-            ok = Handler:submit_error(self(), Socket, Key),
+            ok = Handler:submit_error(ParentPid, Key),
             Acc;
         false ->
             [H|Acc]
     end,
-    exam_submit(Timeout, TsNow, Handler, T, Acc1).
+    exam_submit(Timeout, TsNow, ParentPid, Handler, T, Acc1).
 
 get_timeout(Key, Param) ->
     case esmpp_utils:lookup(Key, Param) of

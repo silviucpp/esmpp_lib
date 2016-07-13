@@ -11,16 +11,18 @@
 
 %% Callback Function Definitions
 
--callback submit_sm_resp_handler(pid(), list()) -> ok.
--callback data_sm_handler(pid(), list()) -> ok.
--callback data_sm_resp_handler(pid(), list()) -> ok.
--callback deliver_sm_handler(pid(), list()) -> ok.
--callback query_sm_resp_handler(pid(), list()) -> ok.
--callback unbind_handler(pid()) -> ok.
--callback outbind_handler(pid(), term()) -> ok.
--callback network_error(pid(), term()) -> ok.
--callback decoder_error(pid(), term()) -> ok.
--callback submit_error(pid(), term()) -> ok.
+-callback send_sm_request(ConnectionPid::pid(), SeqNumber::term(), UniqueId::term(), PartNumber::term(), TotalParts::term()) -> ok.
+-callback submit_sm_resp_handler(ConnectionPid::pid(), Message::list()) -> ok.
+-callback data_sm_handler(ConnectionPid::pid(), Message::list()) -> ok.
+-callback data_sm_resp_handler(ConnectionPid::pid(), Message::list()) -> ok.
+-callback deliver_sm_handler(ConnectionPid::pid(), Message::list()) -> ok.
+-callback query_sm_resp_handler(ConnectionPid::pid(), Message::list()) -> ok.
+-callback bind_completed_handler(ConnectionPid::pid()) -> ok.
+-callback unbind_handler(ConnectionPid::pid()) -> ok.
+-callback outbind_handler(ConnectionPid::pid(), Socket::term()) -> ok.
+-callback network_error(ConnectionPid::pid(), Error::term()) -> ok.
+-callback decoder_error(ConnectionPid::pid(), Error::term()) -> ok.
+-callback submit_error(ConnectionPid::pid(), SeqNumber::term()) -> ok.
 
 %% API Function Definitions
 
@@ -61,8 +63,9 @@ unbind(WorkerPid) ->
 
 init(Param) ->
     {ok, _} = timer:send_after(10, {bind, esmpp_utils:lookup(mode, Param)}),
-    {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link(Param),
-    State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, self()} | Param],
+    WorkerPid = self(),
+    {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link([{parent_pid, WorkerPid} | Param]),
+    State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid} | Param],
     {ok,  State}.
 
 handle_call(_Request, _From, State) ->
@@ -70,7 +73,7 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({submit, List}, State) ->   
     SmsList = esmpp_lib_encoder:encode(submit_sm, State, List),
-    State1 = send_sms(SmsList, State),
+    State1 = send_sms(SmsList, State, esmpp_utils:lookup(unique_id, List)),
     {noreply, State1}; 
 handle_cast({query_sm, List}, State) ->
     Transport = get_transport(State),
@@ -98,7 +101,7 @@ handle_cast({cancel_sm, List}, State) ->
     {noreply, accumulate_seq_num(State)}; 
 handle_cast({data_sm, List}, State) ->
     SmsList = esmpp_lib_encoder:encode(data_sm, State, List),
-    State1 = send_sms([SmsList], State),
+    State1 = send_sms([SmsList], State, esmpp_utils:lookup(unique_id, List)),
     {noreply, State1}; 
 handle_cast({unbind, []}, State) ->
     Transport = get_transport(State),
@@ -124,6 +127,7 @@ handle_info({bind, Mode}, Param) ->
             WorkerPid ! {terminate, Reason},
             Param;
         Socket ->
+            Handler:bind_completed_handler(WorkerPid),
             Param1 = accumulate_seq_num([{socket, Socket}|Param]),
             ListenPid = spawn_link(fun() -> loop_tcp(<<>>, Transport, Socket, WorkerPid, Handler, ProcessingPid) end),
             case esmpp_utils:lookup(enquire_timeout, Param1) of
@@ -187,9 +191,12 @@ handle_bind(Resp, Socket, Transport) ->
             {error, Reason}
     end.
 
-send_sms([], State) ->
+send_sms(List, State, UniqueId) ->
+    send_sms(List, State, UniqueId, 1, length(List)).
+
+send_sms([], State, _UniqueId, _PartNumber, _TotalParts) ->
     State;
-send_sms([Bin|T], State) ->
+send_sms([Bin|T], State, UniqueId, PartNumber, TotalParts) ->
     Transport = get_transport(State),
     WorkerPid = esmpp_utils:lookup(worker_pid, State),
     ProcessingPid = esmpp_utils:lookup(processing_pid, State),
@@ -197,8 +204,9 @@ send_sms([Bin|T], State) ->
     Handler = esmpp_utils:lookup(handler, State),
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, Handler),
+    ok = Handler:send_sm_request(WorkerPid, SeqNum, UniqueId, PartNumber, TotalParts),
     esmpp_lib_submit_processing:push_submit(ProcessingPid, {SeqNum, {Handler, os:timestamp(), Socket}}),
-    send_sms(T, accumulate_seq_num(State)).
+    send_sms(T, accumulate_seq_num(State), UniqueId, PartNumber+1, TotalParts).
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, Handler, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
