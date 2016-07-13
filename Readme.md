@@ -76,9 +76,9 @@ Mandatory parameters include next things:
 * handler — your own module for handle smpp packet from SMSC, 
         example {handler, my_sms},
 * service_type (default {service_type, <<>>})
-* data_coding - you need to know what encoding is set to the channel
+* data_coding - you need to know which encoding is set to the channel
 on the operator side. When the application opens a session you must 
-transmitted value is the same as the encoding configured on the operator 
+transmit value is the same as the encoding is configured on the operator 
 side. Usually gsm encoding is installed (160 characters in one SMS message). 
 In this case, pass the {data_coding, 0} parameter. Sometimes latin1 
 encoding is installed (140 characters in one SMS). In this case, pass the 
