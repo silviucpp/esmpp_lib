@@ -1,7 +1,7 @@
 -module(esmpp_utils).
 -author("silviu").
 
--export([lookup/2, lookup/3, delete/2, replace/3]).
+-export([lookup/2, lookup/3, delete/2, replace/3, send_notification/2]).
 
 lookup(Key, List, Default) ->
     case lists:keyfind(Key, 1, List) of
@@ -19,3 +19,6 @@ delete(Key, List) ->
 
 replace(Key, NewValue, List) ->
     lists:keyreplace(Key, 1, List, {Key, NewValue}).
+
+send_notification(HandlerPid, Message) ->
+    HandlerPid ! Message.
