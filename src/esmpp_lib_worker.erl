@@ -52,7 +52,8 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({submit, List}, State) ->   
     SmsList = esmpp_lib_encoder:encode(submit_sm, State, List),
-    State1 = send_sms(SmsList, State, esmpp_utils:lookup(unique_id, List)),
+    UserParams = esmpp_utils:lookup(user_params, List),
+    State1 = send_sms(SmsList, State, UserParams),
     {noreply, State1}; 
 handle_cast({query_sm, List}, State) ->
     Transport = get_transport(State),
@@ -80,7 +81,8 @@ handle_cast({cancel_sm, List}, State) ->
     {noreply, accumulate_seq_num(State)}; 
 handle_cast({data_sm, List}, State) ->
     SmsList = esmpp_lib_encoder:encode(data_sm, State, List),
-    State1 = send_sms([SmsList], State, esmpp_utils:lookup(unique_id, List)),
+    UserParams = esmpp_utils:lookup(user_params, List),
+    State1 = send_sms([SmsList], State, UserParams),
     {noreply, State1}; 
 handle_cast({unbind, []}, State) ->
     Transport = get_transport(State),
@@ -170,12 +172,12 @@ handle_bind(Resp, Socket, Transport) ->
             {error, Reason}
     end.
 
-send_sms(List, State, UniqueId) ->
-    send_sms(List, State, UniqueId, 1, length(List)).
+send_sms(List, State, UserParams) ->
+    send_sms(List, State, UserParams, 1, length(List)).
 
-send_sms([], State, _UniqueId, _PartNumber, _TotalParts) ->
+send_sms([], State, _UserParams, _PartNumber, _TotalParts) ->
     State;
-send_sms([Bin|T], State, UniqueId, PartNumber, TotalParts) ->
+send_sms([Bin|T], State, UserParams, PartNumber, TotalParts) ->
     Transport = get_transport(State),
     WorkerPid = esmpp_utils:lookup(worker_pid, State),
     ProcessingPid = esmpp_utils:lookup(processing_pid, State),
@@ -183,9 +185,9 @@ send_sms([Bin|T], State, UniqueId, PartNumber, TotalParts) ->
     HandlerPid = esmpp_utils:lookup(handler_pid, State),
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
-    esmpp_utils:send_notification(HandlerPid, {send_sm_request, WorkerPid, SeqNum, UniqueId, PartNumber, TotalParts}),
+    esmpp_utils:send_notification(HandlerPid, {send_sm_request, WorkerPid, SeqNum, UserParams, PartNumber, TotalParts}),
     esmpp_lib_submit_processing:push_submit(ProcessingPid, {SeqNum, {HandlerPid, os:timestamp(), Socket}}),
-    send_sms(T, accumulate_seq_num(State), UniqueId, PartNumber+1, TotalParts).
+    send_sms(T, accumulate_seq_num(State), UserParams, PartNumber+1, TotalParts).
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
