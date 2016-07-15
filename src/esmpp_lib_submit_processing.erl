@@ -79,10 +79,10 @@ exam_submit(_Timeout, _TsNow, _ParentPid,  _HandlerPid, [], Acc) ->
     Acc;
 exam_submit(Timeout, TsNow, ParentPid, HandlerPid, [H|T], Acc) ->
 
-    {Key, {HandlerPid, TsOld, _Socket}} = H,
+    {SeqNum, {HandlerPid, TsOld, _Socket}} = H,
     Acc1 = case timer:now_diff(TsNow, TsOld) > Timeout*1000000 of
         true ->
-            esmpp_utils:send_notification(HandlerPid, {submit_error, ParentPid, Key}),
+            esmpp_utils:send_notification(HandlerPid, {submit_error, ParentPid, SeqNum}),
             Acc;
         false ->
             [H|Acc]
