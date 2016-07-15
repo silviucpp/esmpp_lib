@@ -6,7 +6,8 @@
 -behaviour(gen_server).
 
 -define(SERVER, ?MODULE).
--define(DEFAULT_TIMEOUT, 39).
+-define(DEFAULT_TIMEOUT, 60).
+-define(DEFAULT_CHECK_INTERVAL, 60000).
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([processing_submit/6, push_submit/2]).
@@ -16,7 +17,7 @@ start_link(State) ->
 
 -record(state, {
     submit_check,
-    submit_tref,
+    submit_timeout_ms,
     handler,
     parent_pid
 }).
@@ -28,12 +29,11 @@ push_submit(Pid, Value) ->
     Pid ! {push_submit, Value}.
 
 init(Opt) ->
-    SubmitTimeout = get_timeout(submit_timeout, Opt),
     HandlerPid = esmpp_utils:lookup(handler_pid, Opt),
     ParentPid = esmpp_utils:lookup(parent_pid, Opt),
-
-    {ok, TRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
-    {ok, #state{submit_check = [], submit_tref = TRef, handler = HandlerPid, parent_pid = ParentPid}}.
+    SubmitTimeoutMs = get_timeout(submit_timeout, Opt)*1000,
+    erlang:send_after(?DEFAULT_CHECK_INTERVAL, self(), check_not_ack_submit),
+    {ok, #state{submit_check = [], submit_timeout_ms = SubmitTimeoutMs, handler = HandlerPid, parent_pid = ParentPid}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -55,11 +55,10 @@ handle_info({processing_submit, HandlerPid, List, SeqNum, Message, Status}, Stat
     {noreply, State#state{submit_check = NewSubmitCheck}};
 handle_info({push_submit, Value}, State) ->
     {noreply, State#state{submit_check = [Value | State#state.submit_check]}};
-handle_info({exam_submit, SubmitTimeout}, State) ->
-    {ok, cancel} = timer:cancel(State#state.submit_tref),
-    NewSubmitCheck = exam_submit(SubmitTimeout, os:timestamp(), State),
-    {ok, NewTRef} = timer:send_after(60000, {exam_submit, SubmitTimeout}),
-    {noreply, State#state{submit_tref = NewTRef, submit_check = NewSubmitCheck}};
+handle_info(check_not_ack_submit, State) ->
+    NewSubmitList = check_submit_expired(State),
+    erlang:send_after(?DEFAULT_CHECK_INTERVAL, self(), check_not_ack_submit),
+    {noreply, State#state{submit_check = NewSubmitList}};
 handle_info(Info, State) ->
     ?LOG_DEBUG("Unknown info msg ~p~n", [Info]),
     {noreply, State}.
@@ -72,22 +71,22 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal Function Definitions
 
-exam_submit(SubmitTimeout, TsNow, State) ->
-    exam_submit(SubmitTimeout, TsNow, State#state.parent_pid, State#state.handler, State#state.submit_check, []).
+check_submit_expired(State) ->
+    check_submit_expired(State#state.submit_timeout_ms, esmpp_utils:now(), State#state.parent_pid, State#state.handler, State#state.submit_check, []).
 
-exam_submit(_Timeout, _TsNow, _ParentPid,  _HandlerPid, [], Acc) ->
+check_submit_expired(_Timeout, _NowMs, _ParentPid,  _HandlerPid, [], Acc) ->
     Acc;
-exam_submit(Timeout, TsNow, ParentPid, HandlerPid, [H|T], Acc) ->
+check_submit_expired(Timeout, NowMs, ParentPid, HandlerPid, [H|T], Acc) ->
 
-    {SeqNum, {HandlerPid, TsOld, _Socket}} = H,
-    Acc1 = case timer:now_diff(TsNow, TsOld) > Timeout*1000000 of
+    {SeqNum, {HandlerPid, MessageTimestamp, _Socket}} = H,
+    Acc1 = case NowMs - MessageTimestamp > Timeout of
         true ->
             esmpp_utils:send_notification(HandlerPid, {submit_error, ParentPid, SeqNum}),
             Acc;
         false ->
             [H|Acc]
     end,
-    exam_submit(Timeout, TsNow, ParentPid, HandlerPid, T, Acc1).
+    check_submit_expired(Timeout, NowMs, ParentPid, HandlerPid, T, Acc1).
 
 get_timeout(Key, Param) ->
     case esmpp_utils:lookup(Key, Param) of

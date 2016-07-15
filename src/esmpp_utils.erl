@@ -1,7 +1,11 @@
 -module(esmpp_utils).
 -author("silviu").
 
--export([lookup/2, lookup/3, delete/2, replace/3, send_notification/2]).
+-export([now/0, lookup/2, lookup/3, delete/2, replace/3, send_notification/2]).
+
+now() ->
+    {Mega, Sec, Micro} = erlang:timestamp(),
+    trunc((Mega * 1000000 * 1000000 + Sec * 1000000 + Micro)/1000).
 
 lookup(Key, List, Default) ->
     case lists:keyfind(Key, 1, List) of

@@ -186,7 +186,7 @@ send_sms([Bin|T], State, UserParams, PartNumber, TotalParts) ->
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
     esmpp_utils:send_notification(HandlerPid, {send_sm_request, WorkerPid, SeqNum, UserParams, PartNumber, TotalParts}),
-    esmpp_lib_submit_processing:push_submit(ProcessingPid, {SeqNum, {HandlerPid, os:timestamp(), Socket}}),
+    esmpp_lib_submit_processing:push_submit(ProcessingPid, {SeqNum, {HandlerPid, esmpp_utils:now(), Socket}}),
     send_sms(T, accumulate_seq_num(State), UserParams, PartNumber+1, TotalParts).
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
