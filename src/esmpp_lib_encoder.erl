@@ -84,7 +84,7 @@ submit_sm(List, Param) ->
     SeqNum = esmpp_utils:lookup(seq_n, Param),
     Daddr = get_binary(dest_addr, List),
     Saddr = get_binary(source_addr, List),
-    {Encode, MaxLen} = exam_unicode(Txt, Param),
+    {Encode, MaxLen} = exam_unicode(Txt, esmpp_utils:lookup(data_coding, Param)),
     Text = get_text_by_code(Encode, Txt),
     LenTxt = byte_size(Text),
     case LenTxt > MaxLen of
@@ -114,7 +114,7 @@ submit_sm(List, Param) ->
 data_sm(List, Param) -> 
     Daddr = get_binary(dest_addr, List),
     Txt = esmpp_utils:lookup(text, List),
-    {Encode, _} = exam_unicode(Txt, Param),
+    {Encode, _} = exam_unicode(Txt, esmpp_utils:lookup(data_coding, Param)),
     Text = get_text_by_code(Encode, Txt),
     LenTxt = byte_size(Text),
     SeqNum = esmpp_utils:lookup(seq_n, Param),
@@ -235,22 +235,21 @@ assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
 get_text_by_code(Encode, Bin) ->
     case Encode of 
         0 ->
-            _GsmBin = esmpp_lib_latin1_to_gsm:latin1_to_gsm(Bin, <<>>);
+            esmpp_lib_latin1_to_gsm:latin1_to_gsm(Bin, <<>>);
         8 ->
-	        _NewBin = unicode:characters_to_binary(Bin, utf8, utf16);
+	        unicode:characters_to_binary(Bin, utf8, utf16);
         _ ->
             Bin    
     end.
 
-exam_unicode(Bin, Param) ->
+exam_unicode(Bin, DataCoding) ->
     Latin1 = binary_to_list(Bin),
     Utf = unicode:characters_to_list(Bin),
     case Latin1 =/= Utf of 
         true ->
 	        {8, 140};
         false ->
-            Num = esmpp_utils:lookup(data_coding, Param),
-            case Num of 
+            case DataCoding of
                 undefined -> {0, 160};
 	            0 -> {0, 160};
                 3 -> {3, 140};
@@ -305,17 +304,12 @@ cut_txt(Text, Num, MaxLen, Acc) ->
             cut_txt(Rest, Num+1, MaxLen, [{Num, Chunk}|Acc])
     end.
 
-
 get_binary(Name, List) ->
-    Param = esmpp_utils:lookup(Name, List),
-    case is_integer(Param) of
-        true -> 
-            Param;
-        false ->
-            case is_binary(Param) of
-                true -> Param;
-                false -> list_to_binary(Param)
-            end
-    end.    
-            
-                    
+    case esmpp_utils:lookup(Name, List) of
+        Value when is_binary(Value) ->
+            Value;
+        Value when is_list(Value) ->
+            list_to_binary(Value);
+        Value when is_integer(Value) ->
+            integer_to_binary(Value)
+    end.
