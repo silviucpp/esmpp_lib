@@ -2,16 +2,14 @@
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
 -include("esmpp_lib.hrl").
--export([encode/2, encode/3]).
 
-%% API
--spec encode(atom(), tuple()) -> 
-    binary().
+-export([encode/2, encode/3, number_parts/2]).
+
+-spec encode(Name::atom(), Param::tuple()) -> binary().
 encode(Name, Param) ->
     encode(Name, Param, []).
 
--spec encode(atom(), list(), list()) -> 
-    binary().
+-spec encode(Name::atom(), Param::list(), List::list()) -> binary().
 encode(Name, Param, List) ->
     case Name of
         transceiver ->
@@ -44,6 +42,18 @@ encode(Name, Param, List) ->
             cancel_sm(List, Param);
         replace_sm ->
             replace_sm(List, Param)
+    end.
+
+number_parts(Txt, DataCoding) ->
+    {Encode, MaxLen} = exam_unicode(Txt, DataCoding),
+    LenTxt = byte_size(get_text_by_code(Encode, Txt)),
+    Parts = LenTxt/chunk_length(MaxLen),
+    T = trunc(Parts),
+    case Parts - T == 0 of
+        true ->
+            Parts;
+        _ ->
+            T + 1
     end.
 
 %% INTERNAL
@@ -291,10 +301,7 @@ sar_ref_num(Param) ->
     end.
  
 cut_txt(Text, Num, MaxLen, Acc) ->
-    ChunkLen = case MaxLen of
-        160 -> 153;
-        140 -> 134
-    end,
+    ChunkLen = chunk_length(MaxLen),
     case byte_size(Text) =< ChunkLen of
         true ->
             Len = 1 + length(Acc),
@@ -302,6 +309,14 @@ cut_txt(Text, Num, MaxLen, Acc) ->
         false ->
             <<Chunk:ChunkLen/binary, Rest/binary>> = Text,
             cut_txt(Rest, Num+1, MaxLen, [{Num, Chunk}|Acc])
+    end.
+
+chunk_length(MaxLen) ->
+    case MaxLen of
+        160 ->
+            153;
+        140 ->
+            134
     end.
 
 get_binary(Name, List) ->
