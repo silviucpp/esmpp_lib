@@ -186,7 +186,7 @@ send_sms([Bin|T], State, UserParams, PartNumber, TotalParts) ->
     <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
     ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
     esmpp_utils:send_notification(HandlerPid, {send_sm_request, WorkerPid, SeqNum, UserParams, PartNumber, TotalParts}),
-    esmpp_lib_submit_processing:push_submit(ProcessingPid, {SeqNum, {HandlerPid, esmpp_utils:now(), Socket}}),
+    esmpp_lib_submit_processing:push_submit(ProcessingPid, SeqNum, esmpp_utils:now()),
     send_sms(T, accumulate_seq_num(State), UserParams, PartNumber+1, TotalParts).
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
@@ -241,10 +241,12 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             esmpp_utils:send_notification(HandlerPid, {deliver_sm, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
         submit_sm_resp ->
-            esmpp_lib_submit_processing:processing_submit(ProcessingPid, HandlerPid, List, SeqNum, submit_sm_resp, Status),
+            Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
+            esmpp_lib_submit_processing:processing_submit(ProcessingPid, SeqNum, Params, submit_sm_resp),
             ok;
         data_sm_resp ->
-            esmpp_lib_submit_processing:processing_submit(ProcessingPid, HandlerPid, List, SeqNum, data_sm_resp, Status),
+            Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
+            esmpp_lib_submit_processing:processing_submit(ProcessingPid, SeqNum, Params, data_sm_resp),
             ok; 
         data_sm ->                                                                                  
             MsgId = esmpp_utils:lookup(receipted_message_id, List),

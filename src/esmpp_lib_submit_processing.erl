@@ -10,7 +10,7 @@
 -define(DEFAULT_CHECK_INTERVAL, 60000).
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([processing_submit/6, push_submit/2]).
+-export([processing_submit/4, push_submit/3]).
 
 start_link(State) ->
     gen_server:start_link(?MODULE, State, []).
@@ -22,11 +22,11 @@ start_link(State) ->
     parent_pid
 }).
 
-processing_submit(Pid, HandlerPid, List, SeqNum, OperationHandler, Status) ->
-    Pid ! {processing_submit, HandlerPid, List, SeqNum, OperationHandler, Status}.
+processing_submit(Pid, SeqNum, List, OperationHandler) ->
+    Pid ! {processing_submit, SeqNum, OperationHandler, List}.
 
-push_submit(Pid, Value) ->
-    Pid ! {push_submit, Value}.
+push_submit(Pid, SeqNum, Ts) ->
+    Pid ! {push_submit, {SeqNum, Ts}}.
 
 init(Opt) ->
     HandlerPid = esmpp_utils:lookup(handler_pid, Opt),
@@ -41,20 +41,20 @@ handle_cast(Msg, State) ->
     ?LOG_DEBUG("Unknown cast msg ~p~n", [Msg]),
     {noreply, State}.
 
-handle_info({processing_submit, HandlerPid, List, SeqNum, Message, Status}, State) ->
-    NewSubmitCheck = case is_tuple(esmpp_utils:lookup(SeqNum, State#state.submit_check)) of
-        true ->
-            esmpp_utils:send_notification(HandlerPid, {Message, State#state.parent_pid, [{sequence_number, SeqNum}, {command_status, Status} | List]}),
-            esmpp_utils:delete(SeqNum, State#state.submit_check);
-        _ ->
+handle_info({processing_submit, SeqNum, MessageTag, List}, State) ->
+    case esmpp_utils:lookup(SeqNum, State#state.submit_check) of
+        undefined ->
             %most probably the message was already removed because was not acknowledged in the submit_timeout timeframe
-            ?LOG_ERROR("received processing_submit for unknown seq_number: ~p", [SeqNum]),
-            esmpp_utils:send_notification(HandlerPid, {submit_error, State#state.parent_pid, SeqNum}),
-            State#state.submit_check
-    end,
-    {noreply, State#state{submit_check = NewSubmitCheck}};
-handle_info({push_submit, Value}, State) ->
-    {noreply, State#state{submit_check = [Value | State#state.submit_check]}};
+            %in this case the error signal ewas already triggered.
+            ?LOG_ERROR("ignore processing_submit for unknown seq_number: ~p", [SeqNum]),
+            {noreply, State};
+        _ ->
+            esmpp_utils:send_notification(State#state.handler, {MessageTag, State#state.parent_pid, List}),
+            NewSubmitList = esmpp_utils:delete(SeqNum, State#state.submit_check),
+            {noreply, State#state{submit_check = NewSubmitList}}
+    end;
+handle_info({push_submit, Message}, State) ->
+    {noreply, State#state{submit_check = [Message | State#state.submit_check]}};
 handle_info(check_not_ack_submit, State) ->
     NewSubmitList = check_submit_expired(State),
     erlang:send_after(?DEFAULT_CHECK_INTERVAL, self(), check_not_ack_submit),
@@ -76,14 +76,12 @@ check_submit_expired(State) ->
 
 check_submit_expired(_Timeout, _NowMs, _ParentPid,  _HandlerPid, [], Acc) ->
     Acc;
-check_submit_expired(Timeout, NowMs, ParentPid, HandlerPid, [H|T], Acc) ->
-
-    {SeqNum, {HandlerPid, MessageTimestamp, _Socket}} = H,
-    Acc1 = case NowMs - MessageTimestamp > Timeout of
+check_submit_expired(Timeout, NowMs, ParentPid, HandlerPid, [{SeqNum, MessageTs} = H|T], Acc) ->
+    Acc1 = case NowMs - MessageTs >= Timeout of
         true ->
             esmpp_utils:send_notification(HandlerPid, {submit_error, ParentPid, SeqNum}),
             Acc;
-        false ->
+        _ ->
             [H|Acc]
     end,
     check_submit_expired(Timeout, NowMs, ParentPid, HandlerPid, T, Acc1).
