@@ -57,9 +57,7 @@ handle_info({push_submit, {_SeqNumber, Ts} = Message}, State) ->
 
     TimerRef = case State#state.timer_ref =:= undefined andalso State#state.submit_check =:= [] of
         true ->
-            TriggerMs = next_timer_inteval(Ts, State#state.submit_timeout_ms),
-            ?LOG_INFO(<<"push_submit check for next non ack messages in ~p ms">>, [TriggerMs]),
-            erlang:send_after(TriggerMs, self(), check_not_ack_submit);
+            erlang:send_after(next_timer_inteval(Ts, State#state.submit_timeout_ms), self(), check_not_ack_submit);
         _ ->
             undefined
     end,
@@ -73,9 +71,7 @@ handle_info(check_not_ack_submit, State) ->
         undefined ->
             undefined;
         _ ->
-            TriggerMs = next_timer_inteval(LowestTs, State#state.submit_timeout_ms),
-            ?LOG_INFO(<<"check for next non ack messages in ~p ms">>, [TriggerMs]),
-            erlang:send_after(TriggerMs, self(), check_not_ack_submit)
+            erlang:send_after(next_timer_inteval(LowestTs, State#state.submit_timeout_ms), self(), check_not_ack_submit)
     end,
 
     {noreply, State#state{submit_check = NewSubmitList, timer_ref = TimerRef}};
