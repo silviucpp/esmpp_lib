@@ -45,7 +45,7 @@ init(Param) ->
     {ok,  State}.
 
 handle_call({submit, List}, _From, State) ->
-    SmsList = esmpp_lib_encoder:encode(submit_sm, State, List),
+    SmsList = esmpp_encoder:encode(submit_sm, State, List),
 
     case send_sms(SmsList, State) of
         {ok, LastSeqNumber, MsgSegmentsSeqNumbers} ->
@@ -54,7 +54,7 @@ handle_call({submit, List}, _From, State) ->
             {reply, UnexpectedResponse, State}
     end;
 handle_call({data_sm, List}, _From, State) ->
-    SmsList = esmpp_lib_encoder:encode(data_sm, State, List),
+    SmsList = esmpp_encoder:encode(data_sm, State, List),
 
     case send_sms([SmsList], State) of
         {ok, LastSeqNumber, MsgSegmentsSeqNumbers} ->
@@ -65,7 +65,7 @@ handle_call({data_sm, List}, _From, State) ->
 handle_call({query_sm, List}, _From, State) ->
     Transport = get_transport(State),
     Socket = esmpp_utils:lookup(socket, State),
-    Bin = esmpp_lib_encoder:encode(query_sm, State, List),
+    Bin = esmpp_encoder:encode(query_sm, State, List),
     SequenceNumber = esmpp_utils:lookup(seq_n, State),
 
     case send(Transport, Socket, Bin) of
@@ -77,7 +77,7 @@ handle_call({query_sm, List}, _From, State) ->
 handle_call({replace_sm, List}, _From, State) ->
     Transport = get_transport(State),
     Socket = esmpp_utils:lookup(socket, State),
-    Bin = esmpp_lib_encoder:encode(replace_sm, State, List),
+    Bin = esmpp_encoder:encode(replace_sm, State, List),
     SequenceNumber = esmpp_utils:lookup(seq_n, State),
 
     case send(Transport, Socket, Bin) of
@@ -89,7 +89,7 @@ handle_call({replace_sm, List}, _From, State) ->
 handle_call({cancel_sm, List}, _From, State) ->
     Transport = get_transport(State),
     Socket = esmpp_utils:lookup(socket, State),
-    Bin = esmpp_lib_encoder:encode(cancel_sm, State, List),
+    Bin = esmpp_encoder:encode(cancel_sm, State, List),
     SequenceNumber = esmpp_utils:lookup(seq_n, State),
 
     case send(Transport, Socket, Bin) of
@@ -106,7 +106,7 @@ handle_cast({unbind, []}, State) ->
     HandlerPid = esmpp_utils:lookup(handler_pid, State),
     WorkerPid = esmpp_utils:lookup(worker_pid, State),
     Socket = esmpp_utils:lookup(socket, State),
-    Bin = esmpp_lib_encoder:encode(unbind, State),
+    Bin = esmpp_encoder:encode(unbind, State),
     ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
     esmpp_utils:send_notification(HandlerPid, {unbind, WorkerPid}),
     WorkerPid ! {terminate, unbind},
@@ -163,7 +163,7 @@ bind(Mode, Param) ->
         {error, Reason} ->
             {error, Reason};
         {_, Socket} ->
-            Bin = esmpp_lib_encoder:encode(Mode, Param),
+            Bin = esmpp_encoder:encode(Mode, Param),
             Resp = Transport:send(Socket, Bin),
             case handle_bind(Resp, Socket, Transport) of
                 ok ->
@@ -214,7 +214,7 @@ send_sms([], NextSeqNumber, _WorkerPid, _ProcessingPid, _Socket, _HandlerPid, _T
 loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
-            try esmpp_lib_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>, []) of
+            try esmpp_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>, []) of
                 [{undefined, Name}|_] ->
                     ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
                     loop_tcp(<<>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid);
@@ -255,13 +255,13 @@ create_resp([H|T], Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
 assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
     case Name of
         enquire_link -> 
-            esmpp_lib_encoder:encode(enquire_link_resp, [], [{sequence_number, SeqNum}]);
+            esmpp_encoder:encode(enquire_link_resp, [], [{sequence_number, SeqNum}]);
         enquire_link_resp ->
             ok; 
         deliver_sm -> 
             MsgId = esmpp_utils:lookup(receipted_message_id, List),
             esmpp_utils:send_notification(HandlerPid, {deliver_sm, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
-            esmpp_lib_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]); 
+            esmpp_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         submit_sm_resp ->
             Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
             esmpp_lib_submit_processing:processing_submit(ProcessingPid, SeqNum, Params, submit_sm_resp),
@@ -273,7 +273,7 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
         data_sm ->                                                                                  
             MsgId = esmpp_utils:lookup(receipted_message_id, List),
             esmpp_utils:send_notification(HandlerPid, {data_sm, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
-            esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
+            esmpp_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         query_sm_resp ->
             esmpp_utils:send_notification(HandlerPid, {query_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             ok;
@@ -291,18 +291,18 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             ?LOG_ERROR("Generic nack error code ~p~n", [Status]);
         unbind_resp ->
             ?LOG_ERROR("Unbind session ~p~n", [WorkerPid]),
-            Bin = esmpp_lib_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
+            Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin};
         unbind ->
             ?LOG_ERROR("Unbind session ~p~n", [WorkerPid]),
-            Bin = esmpp_lib_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
+            Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin}
     end.
 
 exam_bind_resp(Socket, Transport) ->
     case Transport:recv(Socket, 0, 5000) of 
         {ok, Bin} ->
-            [{_Name, Code, _SeqNum, _List}] = esmpp_lib_decoder:decode(Bin, []),
+            [{_Name, Code, _SeqNum, _List}] = esmpp_decoder:decode(Bin, []),
             case Code of 
                 0 ->
                     ok;
@@ -322,7 +322,7 @@ enquire_link(State) ->
     Socket = esmpp_utils:lookup(socket, State),
     WorkerPid = esmpp_utils:lookup(worker_pid, State),
     HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    Bin = esmpp_lib_encoder:encode(enquire_link, State),
+    Bin = esmpp_encoder:encode(enquire_link, State),
     ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
     enquire_link(accumulate_seq_num(State)).                       
     
