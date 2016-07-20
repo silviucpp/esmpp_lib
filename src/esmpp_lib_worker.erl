@@ -37,10 +37,9 @@ cancel_sm(WorkerPid, List) ->
 unbind(WorkerPid) ->
     gen_server:cast(WorkerPid, {unbind, []}).
 
-
 init(Param) ->
     WorkerPid = self(),
-    {ok, _} = timer:send_after(10, {bind, esmpp_utils:lookup(mode, Param)}),
+    erlang:send_after(10, self(), {bind, esmpp_utils:lookup(mode, Param)}),
     {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link([{parent_pid, WorkerPid} | Param]),
     State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid} | Param],
     {ok,  State}.
