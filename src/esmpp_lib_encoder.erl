@@ -300,13 +300,13 @@ sar_ref_num(Param) ->
     Sar = esmpp_utils:lookup(sar, Param),
     WorkerPid = esmpp_utils:lookup(worker_pid, Param),
     case Sar of
-	 255->
-        WorkerPid ! {update_state, {sar, 0}},
-	    1;
-	Key ->
-	    Key1 = Key + 1,
-        WorkerPid ! {update_state, {sar, Key1}},
-	    Key1
+	    255->
+            esmpp_lib_worker:update_sar(WorkerPid, 0),
+            1;
+	    Key ->
+	        Key1 = Key + 1,
+            esmpp_lib_worker:update_sar(WorkerPid, Key1),
+	        Key1
     end.
  
 cut_txt(Text, Num, MaxLen, Acc) ->

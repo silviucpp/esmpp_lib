@@ -7,7 +7,8 @@
 -define(SERVER, ?MODULE).
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2, replace_sm/2]).
+-export([update_sar/2]).
+-export([submit/2, data_sm/2, cancel_sm/2, replace_sm/2, query_sm/2, unbind/1]).
 
 start_link(Param) ->
     gen_server:start_link(?MODULE, Param, []).
@@ -137,11 +138,8 @@ handle_info({bind, Mode}, Param) ->
             [{mode, Mode},{listen_pid, ListenPid}|Param1]
     end,
     {noreply, State1};
-handle_info({update_state, {Name, NewEntry}}, State) ->
-    {noreply, esmpp_utils:replace(Name, NewEntry, State)};
-handle_info({get_state, ListenPid}, State) ->
-    ListenPid ! {state, State},
-    {noreply, State};
+handle_info({update_sar, Value}, State) ->
+    {noreply, esmpp_utils:replace(sar, Value, State)};
 handle_info({terminate, Reason}, State) ->
     {stop, Reason, State};
 handle_info(Info, State) ->
@@ -156,6 +154,9 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% Internal Function Definitions
+
+update_sar(Pid, Value) ->
+    Pid ! {update_sar, Value}.
 
 bind(Mode, Param) ->
     Transport = get_transport(Param),
