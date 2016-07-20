@@ -301,11 +301,11 @@ sar_ref_num(Param) ->
     WorkerPid = esmpp_utils:lookup(worker_pid, Param),
     case Sar of
 	    255->
-            esmpp_lib_worker:update_sar(WorkerPid, 0),
+            esmpp_connection:update_sar(WorkerPid, 0),
             1;
 	    Key ->
 	        Key1 = Key + 1,
-            esmpp_lib_worker:update_sar(WorkerPid, Key1),
+            esmpp_connection:update_sar(WorkerPid, Key1),
 	        Key1
     end.
  

@@ -1,4 +1,4 @@
--module(esmpp_lib_worker).
+-module(esmpp_connection).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
 -include("esmpp_lib.hrl").
