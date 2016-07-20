@@ -232,13 +232,22 @@ assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
     SaddrNpi = esmpp_utils:lookup(source_addr_npi, Param),
     DaddrTon = esmpp_utils:lookup(dest_addr_ton, Param),
     DaddrNpi = esmpp_utils:lookup(dest_addr_npi, Param),
+
+    %in case of a concatenated message ask for DLR only for the first segment.
+    DlrRequired = case Acc of
+        [] ->
+            1;
+        _ ->
+            0
+    end,
+
     Bin = ?SUBMIT_SM_CUT(1234, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                 Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr,
-                Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg),
+                Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg, DlrRequired),
     Length = byte_size(Bin),
     Bin1 = ?SUBMIT_SM_CUT(Length, SeqNum, ServType, LenType, SaddrTon, SaddrNpi, 
                     Saddr, LenSaddr, DaddrTon, DaddrNpi, Daddr, LenDaddr,
-                    Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg),
+                    Encode, LenMsg, Chunk, LenChunk, SarRefNum, SarSegNum, SarTotSeg, DlrRequired),
     Param1 = esmpp_utils:replace(seq_n, SeqNum + 1, Param),
     assemble_submit({SarTotSeg, T}, SarRefNum, List, Param1, Encode, [Bin1|Acc]).
 
