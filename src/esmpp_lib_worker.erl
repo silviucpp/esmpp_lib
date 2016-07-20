@@ -1,89 +1,106 @@
 -module(esmpp_lib_worker).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
+-include("esmpp_lib.hrl").
+
 -behaviour(gen_server).
 -define(SERVER, ?MODULE).
-
--include("esmpp_lib.hrl").
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([submit/2, data_sm/2, unbind/1, query_sm/2, cancel_sm/2, replace_sm/2]).
 
-%% API Function Definitions
-
 start_link(Param) ->
     gen_server:start_link(?MODULE, Param, []).
 
--spec submit(pid(), list()) -> ok.
+-spec submit(WorkerPid::pid(), List::list()) -> {ok, SegmentsSequenceNumber::list(), Segments::integer()} | {error, Reason::term()}.
 submit(WorkerPid, List) ->
-    gen_server:cast(WorkerPid, {submit, List}).
+    gen_server:call(WorkerPid, {submit, List}, infinity).
 
--spec data_sm(pid(), list()) -> ok.
+-spec data_sm(WorkerPid::pid(), List::list()) -> {ok, SegmentsSequenceNumber::list(), Segments::integer()} | {error, Reason::term()}.
 data_sm(WorkerPid, List) ->
-    gen_server:cast(WorkerPid, {data_sm, List}).
+    gen_server:call(WorkerPid, {data_sm, List}, infinity).
 
--spec query_sm(pid(), list()) -> ok.
+-spec query_sm(WorkerPid::pid(), List::list()) -> {ok, SequenceNumber::integer()} | {error, Reason::term()}.
 query_sm(WorkerPid, List) ->
-    gen_server:cast(WorkerPid, {query_sm, List}).
+    gen_server:call(WorkerPid, {query_sm, List}).
 
--spec replace_sm(pid(), list()) -> ok.
+-spec replace_sm(WorkerPid::pid(), List::list()) ->  {ok, SequenceNumber::integer()} | {error, Reason::term()}.
 replace_sm(WorkerPid, List) ->
-    gen_server:cast(WorkerPid, {replace_sm, List}).
+    gen_server:call(WorkerPid, {replace_sm, List}).
 
--spec cancel_sm(pid(), list()) -> ok.
+-spec cancel_sm(WorkerPid::pid(), List::list()) -> {ok, SequenceNumber::integer()} | {error, Reason::term()}.
 cancel_sm(WorkerPid, List) ->
-    gen_server:cast(WorkerPid, {cancel_sm, List}).
+    gen_server:call(WorkerPid, {cancel_sm, List}).
 
 -spec unbind(pid()) -> ok.  
 unbind(WorkerPid) ->
     gen_server:cast(WorkerPid, {unbind, []}).
 
-%% gen_server Function Definitions
 
 init(Param) ->
-    {ok, _} = timer:send_after(10, {bind, esmpp_utils:lookup(mode, Param)}),
     WorkerPid = self(),
+    {ok, _} = timer:send_after(10, {bind, esmpp_utils:lookup(mode, Param)}),
     {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link([{parent_pid, WorkerPid} | Param]),
     State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid} | Param],
     {ok,  State}.
 
-handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
-
-handle_cast({submit, List}, State) ->   
+handle_call({submit, List}, _From, State) ->
     SmsList = esmpp_lib_encoder:encode(submit_sm, State, List),
-    UserParams = esmpp_utils:lookup(user_params, List),
-    State1 = send_sms(SmsList, State, UserParams),
-    {noreply, State1}; 
-handle_cast({query_sm, List}, State) ->
+
+    case send_sms(SmsList, State) of
+        {ok, LastSeqNumber, MsgSegmentsSeqNumbers} ->
+            {reply, {ok, MsgSegmentsSeqNumbers, length(SmsList)}, replace_seq_num(State, LastSeqNumber)};
+        UnexpectedResponse ->
+            {reply, UnexpectedResponse, State}
+    end;
+handle_call({data_sm, List}, _From, State) ->
+    SmsList = esmpp_lib_encoder:encode(data_sm, State, List),
+
+    case send_sms([SmsList], State) of
+        {ok, LastSeqNumber, MsgSegmentsSeqNumbers} ->
+            {reply, {ok, MsgSegmentsSeqNumbers, 1}, replace_seq_num(State, LastSeqNumber)};
+        UnexpectedResponse ->
+            {reply, UnexpectedResponse, State}
+    end;
+handle_call({query_sm, List}, _From, State) ->
     Transport = get_transport(State),
-    HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    WorkerPid = esmpp_utils:lookup(worker_pid, State),
     Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(query_sm, State, List),
-    ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
-    {noreply, accumulate_seq_num(State)}; 
-handle_cast({replace_sm, List}, State) ->
+    SequenceNumber = esmpp_utils:lookup(seq_n, State),
+
+    case send(Transport, Socket, Bin) of
+        ok ->
+            {reply, {ok, SequenceNumber}, accumulate_seq_num(State)};
+        UnexpectedResponse ->
+            {reply, UnexpectedResponse, State}
+    end;
+handle_call({replace_sm, List}, _From, State) ->
     Transport = get_transport(State),
-    HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    WorkerPid = esmpp_utils:lookup(worker_pid, State),
     Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(replace_sm, State, List),
-    ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
-    {noreply, accumulate_seq_num(State)}; 
-handle_cast({cancel_sm, List}, State) ->
-    HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    WorkerPid = esmpp_utils:lookup(worker_pid, State),
+    SequenceNumber = esmpp_utils:lookup(seq_n, State),
+
+    case send(Transport, Socket, Bin) of
+        ok ->
+            {reply, {ok, SequenceNumber}, accumulate_seq_num(State)};
+        UnexpectedResponse ->
+            {reply, UnexpectedResponse, State}
+    end;
+handle_call({cancel_sm, List}, _From, State) ->
     Transport = get_transport(State),
     Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_lib_encoder:encode(cancel_sm, State, List),
-    ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
-    {noreply, accumulate_seq_num(State)}; 
-handle_cast({data_sm, List}, State) ->
-    SmsList = esmpp_lib_encoder:encode(data_sm, State, List),
-    UserParams = esmpp_utils:lookup(user_params, List),
-    State1 = send_sms([SmsList], State, UserParams),
-    {noreply, State1}; 
+    SequenceNumber = esmpp_utils:lookup(seq_n, State),
+
+    case send(Transport, Socket, Bin) of
+        ok ->
+            {reply, {ok, SequenceNumber}, accumulate_seq_num(State)};
+        UnexpectedResponse ->
+            {reply, UnexpectedResponse, State}
+    end;
+handle_call(_Request, _From, State) ->
+    {reply, ok, State}.
+
 handle_cast({unbind, []}, State) ->
     Transport = get_transport(State),
     HandlerPid = esmpp_utils:lookup(handler_pid, State),
@@ -161,8 +178,7 @@ connect(Param) ->
     Transport = get_transport(Param),
     Ip = esmpp_utils:lookup(host, Param),
     Port = esmpp_utils:lookup(port, Param),
-    _ = Transport:connect(Ip, Port, [binary, {active, false},
-                        {keepalive, true}, {reuseaddr, true}, {packet, 0}], 2000).
+    Transport:connect(Ip, Port, [binary, {active, false}, {keepalive, true}, {reuseaddr, true}, {packet, 0}], 2000).
 
 handle_bind(Resp, Socket, Transport) ->
     case Resp of
@@ -172,22 +188,28 @@ handle_bind(Resp, Socket, Transport) ->
             {error, Reason}
     end.
 
-send_sms(List, State, UserParams) ->
-    send_sms(List, State, UserParams, 1, length(List)).
-
-send_sms([], State, _UserParams, _PartNumber, _TotalParts) ->
-    State;
-send_sms([Bin|T], State, UserParams, PartNumber, TotalParts) ->
+send_sms(List, State) ->
     Transport = get_transport(State),
     WorkerPid = esmpp_utils:lookup(worker_pid, State),
     ProcessingPid = esmpp_utils:lookup(processing_pid, State),
     Socket = esmpp_utils:lookup(socket, State),
     HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    <<_:12/binary, SeqNum:32/integer, _/binary>> = Bin,
-    ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
-    esmpp_utils:send_notification(HandlerPid, {send_sm_request, WorkerPid, SeqNum, UserParams, PartNumber, TotalParts}),
-    esmpp_lib_submit_processing:push_submit(ProcessingPid, SeqNum, esmpp_utils:now()),
-    send_sms(T, accumulate_seq_num(State), UserParams, PartNumber+1, TotalParts).
+    SequenceNumber = esmpp_utils:lookup(seq_n, State),
+    send_sms(List, SequenceNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, []).
+
+send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, AccSeq) ->
+    <<_:12/binary, NextSeqNumber:32/integer, _/binary>> = Bin,
+
+    case send(Transport, Socket, Bin) of
+        ok ->
+            esmpp_lib_submit_processing:push_submit(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
+            send_sms(T, get_next_seq_nr(NextSeqNumber), WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
+        UnexpectedResponse ->
+            UnexpectedResponse
+    end;
+
+send_sms([], NextSeqNumber, _WorkerPid, _ProcessingPid, _Socket, _HandlerPid, _Transport, AccSeq) ->
+    {ok, NextSeqNumber, lists:reverse(AccSeq)}.
 
 loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
@@ -253,7 +275,14 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             esmpp_utils:send_notification(HandlerPid, {data_sm, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             esmpp_lib_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         query_sm_resp ->
-            esmpp_utils:send_notification(HandlerPid, {query_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]});
+            esmpp_utils:send_notification(HandlerPid, {query_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            ok;
+        replace_sm_resp ->
+            esmpp_utils:send_notification(HandlerPid, {replace_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            ok;
+        cancel_sm_resp ->
+            esmpp_utils:send_notification(HandlerPid, {cancel_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            ok;
         alert_notification ->
             ok;
         outbind ->
@@ -305,14 +334,21 @@ get_transport(Param) ->
     end.
      
 accumulate_seq_num(State) ->
-    Value = case esmpp_utils:lookup(seq_n, State) of
+    replace_seq_num(State, next_seq_num(State)).
+
+replace_seq_num(State, SeqNumber) ->
+    esmpp_utils:replace(seq_n, SeqNumber, State).
+
+next_seq_num(State) ->
+    get_next_seq_nr(esmpp_utils:lookup(seq_n, State)).
+
+get_next_seq_nr(Nr) ->
+    case Nr of
         999999 ->
             1;
-        SeqNum ->
-            SeqNum + 1
-    end,
-
-    esmpp_utils:replace(seq_n, Value, State).
+        _ ->
+            Nr + 1
+    end.
      
 try_send(Transport, Socket, Bin, WorkerPid, HandlerPid) ->
     case Transport:send(Socket, Bin) of
@@ -321,4 +357,13 @@ try_send(Transport, Socket, Bin, WorkerPid, HandlerPid) ->
             esmpp_utils:send_notification(HandlerPid, {network_error, WorkerPid, Reason}),
             WorkerPid ! {terminate, Reason}, 
             ok
-    end. 
+    end.
+
+send(Transport, Socket, Bin) ->
+    case Transport:send(Socket, Bin) of
+        ok ->
+            ok;
+        {error, Reason} = UnexpectedError ->
+            self() ! {terminate, Reason},
+            UnexpectedError
+    end.
