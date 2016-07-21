@@ -37,9 +37,6 @@
 -define(COMMAND_ID_QUERY_BROADCAST_SM_RESP, 2147483922).    %0x80000112
 -define(COMMAND_ID_CANCEL_BROADCAST_SM_RESP, 2147483923).   %0x80000113
 
--define(SMPP_VERSION_5_0, <<"5.0">>).
--define(SMPP_VERSION_3_4, <<"3.4">>).
-
 -export([decode/1]).
 
 -spec decode(Bin::binary()) -> list().

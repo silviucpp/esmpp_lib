@@ -6,7 +6,6 @@
 -behaviour(gen_server).
 
 -define(SERVER, ?MODULE).
--define(DEFAULT_TIMEOUT, 60).
 -define(MIN_EXPIRE_ACCURACY_MS, 5000).
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -29,11 +28,9 @@ process_submit(Pid, SeqNum, List, OperationHandler) ->
 push_submit(Pid, SeqNum, Ts) ->
     Pid ! {push_submit, {SeqNum, Ts}}.
 
-init(Opt) ->
-    HandlerPid = esmpp_utils:lookup(handler_pid, Opt),
-    ParentPid = esmpp_utils:lookup(parent_pid, Opt),
-    SubmitTimeoutMs = get_timeout(submit_timeout, Opt)*1000,
-    {ok, #state{submit_check = [], submit_timeout_ms = SubmitTimeoutMs, handler_pid = HandlerPid, parent_pid = ParentPid}}.
+init([HandlerPid, ConnectionPid, SubmitTimeout]) ->
+    SubmitTimeoutMs = SubmitTimeout*1000,
+    {ok, #state{submit_check = [], submit_timeout_ms = SubmitTimeoutMs, handler_pid = HandlerPid, parent_pid = ConnectionPid}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -108,11 +105,3 @@ get_new_timestamp(undefined, NewValue) ->
     NewValue;
 get_new_timestamp(CurrentValue, NewValue) ->
     erlang:min(CurrentValue, NewValue).
-
-get_timeout(Key, Param) ->
-    case esmpp_utils:lookup(Key, Param) of
-        Value when is_integer(Value) ->
-            Value;
-        false ->
-            ?DEFAULT_TIMEOUT
-    end.

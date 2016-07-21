@@ -2,6 +2,7 @@
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
 -include("esmpp.hrl").
+-include("esmpp_records.hrl").
 
 -behaviour(gen_server).
 -define(SERVER, ?MODULE).
@@ -38,18 +39,48 @@ unbind(WorkerPid) ->
     gen_server:cast(WorkerPid, {unbind, []}).
 
 init(Param) ->
-    WorkerPid = self(),
-    erlang:send_after(10, self(), {bind, esmpp_utils:lookup(mode, Param)}),
-    {ok, ProcessingPid} = esmpp_submit_queue:start_link([{parent_pid, WorkerPid} | Param]),
-    State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid} | Param],
-    {ok,  State}.
+    ConnectionPid = self(),
+    HandlerPid = esmpp_utils:lookup(handler_pid, Param),
+    SubmitTimeout = esmpp_utils:lookup(submit_timeout, Param, 60),
+
+    erlang:send_after(10, self(), binding),
+    {ok, ProcessingPid} = esmpp_submit_queue:start_link([HandlerPid, ConnectionPid, SubmitTimeout]),
+
+    State = #conn_state {
+        processing_pid = ProcessingPid,
+        connection_pid = ConnectionPid,
+        sar = 0,
+        seq_n = 0,
+
+        host = esmpp_utils:lookup(host, Param),
+        port = esmpp_utils:lookup(port, Param),
+        password = esmpp_utils:lookup(password, Param),
+        system_id = esmpp_utils:lookup(system_id, Param),
+        transport = get_transport(esmpp_utils:lookup(transport, Param)),
+        interface_version = esmpp_utils:lookup(interface_version, Param),
+        enquire_timeout = esmpp_utils:lookup(enquire_timeout, Param),
+        submit_timeout = SubmitTimeout,
+        system_type = esmpp_utils:lookup(system_type, Param),
+        service_type = esmpp_utils:lookup(service_type, Param),
+        addr_ton = esmpp_utils:lookup(addr_ton, Param),
+        addr_npi = esmpp_utils:lookup(addr_npi, Param),
+        source_addr_ton = esmpp_utils:lookup(source_addr_ton, Param),
+        source_addr_npi = esmpp_utils:lookup(source_addr_npi, Param),
+        dest_addr_ton = esmpp_utils:lookup(dest_addr_ton, Param),
+        dest_addr_npi = esmpp_utils:lookup(dest_addr_npi, Param),
+        mode = esmpp_utils:lookup(mode, Param),
+        data_coding = esmpp_utils:lookup(data_coding, Param),
+        handler_pid = HandlerPid
+    },
+
+    {ok, State}.
 
 handle_call({submit, List}, _From, State) ->
     SmsList = esmpp_encoder:encode(submit_sm, State, List),
 
     case send_sms(SmsList, State) of
         {ok, LastSeqNumber, MsgSegmentsSeqNumbers} ->
-            {reply, {ok, MsgSegmentsSeqNumbers, length(SmsList)}, replace_seq_num(State, LastSeqNumber)};
+            {reply, {ok, MsgSegmentsSeqNumbers, length(SmsList)}, State#conn_state{seq_n = LastSeqNumber}};
         UnexpectedResponse ->
             {reply, UnexpectedResponse, State}
     end;
@@ -58,43 +89,34 @@ handle_call({data_sm, List}, _From, State) ->
 
     case send_sms([SmsList], State) of
         {ok, LastSeqNumber, MsgSegmentsSeqNumbers} ->
-            {reply, {ok, MsgSegmentsSeqNumbers, 1}, replace_seq_num(State, LastSeqNumber)};
+            {reply, {ok, MsgSegmentsSeqNumbers, 1}, State#conn_state{seq_n = LastSeqNumber}};
         UnexpectedResponse ->
             {reply, UnexpectedResponse, State}
     end;
 handle_call({query_sm, List}, _From, State) ->
-    Transport = get_transport(State),
-    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_encoder:encode(query_sm, State, List),
-    SequenceNumber = esmpp_utils:lookup(seq_n, State),
 
-    case send(Transport, Socket, Bin) of
+    case send(State#conn_state.transport, State#conn_state.socket, Bin) of
         ok ->
-            {reply, {ok, SequenceNumber}, accumulate_seq_num(State)};
+            {reply, {ok, State#conn_state.seq_n}, accumulate_seq_num(State)};
         UnexpectedResponse ->
             {reply, UnexpectedResponse, State}
     end;
 handle_call({replace_sm, List}, _From, State) ->
-    Transport = get_transport(State),
-    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_encoder:encode(replace_sm, State, List),
-    SequenceNumber = esmpp_utils:lookup(seq_n, State),
 
-    case send(Transport, Socket, Bin) of
+    case send(State#conn_state.transport, State#conn_state.socket, Bin) of
         ok ->
-            {reply, {ok, SequenceNumber}, accumulate_seq_num(State)};
+            {reply, {ok, State#conn_state.seq_n}, accumulate_seq_num(State)};
         UnexpectedResponse ->
             {reply, UnexpectedResponse, State}
     end;
 handle_call({cancel_sm, List}, _From, State) ->
-    Transport = get_transport(State),
-    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_encoder:encode(cancel_sm, State, List),
-    SequenceNumber = esmpp_utils:lookup(seq_n, State),
 
-    case send(Transport, Socket, Bin) of
+    case send(State#conn_state.transport, State#conn_state.socket, Bin) of
         ok ->
-            {reply, {ok, SequenceNumber}, accumulate_seq_num(State)};
+            {reply, {ok, State#conn_state.seq_n}, accumulate_seq_num(State)};
         UnexpectedResponse ->
             {reply, UnexpectedResponse, State}
     end;
@@ -102,51 +124,43 @@ handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({unbind, []}, State) ->
-    Transport = get_transport(State),
-    HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    WorkerPid = esmpp_utils:lookup(worker_pid, State),
-    Socket = esmpp_utils:lookup(socket, State),
     Bin = esmpp_encoder:encode(unbind, State),
-    ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
-    esmpp_utils:send_notification(HandlerPid, {unbind, WorkerPid}),
-    WorkerPid ! {terminate, unbind},
+    ok = try_send(State#conn_state.transport, State#conn_state.socket, Bin, State#conn_state.connection_pid, State#conn_state.handler_pid),
+    esmpp_utils:send_notification(State#conn_state.handler_pid, {unbind, State#conn_state.connection_pid}),
+    State#conn_state.connection_pid ! {terminate, unbind},
     {noreply, accumulate_seq_num(State)}; 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({bind, Mode}, Param) ->
-    Transport = get_transport(Param),
-    WorkerPid = esmpp_utils:lookup(worker_pid, Param),
-    ProcessingPid = esmpp_utils:lookup(processing_pid, Param),
-    HandlerPid = esmpp_utils:lookup(handler_pid, Param),
-    State1 = case bind(Mode, Param) of
+handle_info(binding, State) ->
+    case bind(State) of
         {error, Reason} ->
-            esmpp_utils:send_notification(HandlerPid, {network_error, WorkerPid, Reason}),
-            WorkerPid ! {terminate, Reason},
-            Param;
+            esmpp_utils:send_notification(State#conn_state.handler_pid, {network_error, State#conn_state.connection_pid, Reason}),
+            State#conn_state.connection_pid ! {terminate, Reason},
+            {noreply, State};
         Socket ->
-            esmpp_utils:send_notification(HandlerPid, {bind_completed, WorkerPid}),
-            Param1 = accumulate_seq_num([{socket, Socket}|Param]),
-            ListenPid = spawn_link(fun() -> loop_tcp(<<>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) end),
-            case esmpp_utils:lookup(enquire_timeout, Param1) of
+            esmpp_utils:send_notification(State#conn_state.handler_pid, {bind_completed, State#conn_state.connection_pid}),
+
+            ListenPid = spawn_link(fun() -> loop_tcp(<<>>, State#conn_state.transport, Socket, State#conn_state.connection_pid, State#conn_state.handler_pid, State#conn_state.processing_pid) end),
+            case State#conn_state.enquire_timeout of
                 undefined ->
                     ok;
                 _ ->
-                    spawn_link(fun() -> enquire_link(Param1) end)
+                    spawn_link(fun() -> enquire_link(accumulate_seq_num(State)) end)
             end,
-            [{mode, Mode},{listen_pid, ListenPid}|Param1]
-    end,
-    {noreply, State1};
+
+            {noreply, State#conn_state {socket = Socket, listen_pid = ListenPid, seq_n = esmpp_utils:get_next_sequence_number(State#conn_state.seq_n)}}
+    end;
 handle_info({update_sar, Value}, State) ->
-    {noreply, esmpp_utils:replace(sar, Value, State)};
+    {noreply, State#conn_state{sar = Value}};
 handle_info({terminate, Reason}, State) ->
     {stop, Reason, State};
 handle_info(Info, State) ->
-    ?LOG_INFO("Massage for nothing ~p~n", [Info]),
+    ?LOG_INFO("received unexpected message ~p", [Info]),
     {noreply, State}.
 
 terminate(Reason, State) -> 
-    ?LOG_INFO("Process terminate with reason ~p state is ~p~n", [Reason, State]),
+    ?LOG_INFO("connection process terminate with reason ~p state is ~p", [Reason, State]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -157,28 +171,25 @@ code_change(_OldVsn, State, _Extra) ->
 update_sar(Pid, Value) ->
     Pid ! {update_sar, Value}.
 
-bind(Mode, Param) ->
-    Transport = get_transport(Param),
-    case connect(Param) of
+bind(State) ->
+    Transport = State#conn_state.transport,
+    ConnectionOptions = [binary, {active, false}, {keepalive, true}, {reuseaddr, true}, {packet, 0}],
+
+    case Transport:connect(State#conn_state.host, State#conn_state.port, ConnectionOptions, 2000) of
         {error, Reason} ->
             {error, Reason};
         {_, Socket} ->
-            Bin = esmpp_encoder:encode(Mode, Param),
+            Bin = esmpp_encoder:encode(State#conn_state.mode, State),
             Resp = Transport:send(Socket, Bin),
             case handle_bind(Resp, Socket, Transport) of
                 ok ->
-                    ?LOG_INFO("Socket ~p mode ~p~n", [Socket, Mode]),
+                    ?LOG_INFO("socket ~p mode ~p~n", [Socket, State#conn_state.mode]),
                     Socket;
                 {error, Reason} ->    
                     {error, Reason}
             end
     end. 
 
-connect(Param) ->
-    Transport = get_transport(Param),
-    Ip = esmpp_utils:lookup(host, Param),
-    Port = esmpp_utils:lookup(port, Param),
-    Transport:connect(Ip, Port, [binary, {active, false}, {keepalive, true}, {reuseaddr, true}, {packet, 0}], 2000).
 
 handle_bind(Resp, Socket, Transport) ->
     case Resp of
@@ -189,12 +200,12 @@ handle_bind(Resp, Socket, Transport) ->
     end.
 
 send_sms(List, State) ->
-    Transport = get_transport(State),
-    WorkerPid = esmpp_utils:lookup(worker_pid, State),
-    ProcessingPid = esmpp_utils:lookup(processing_pid, State),
-    Socket = esmpp_utils:lookup(socket, State),
-    HandlerPid = esmpp_utils:lookup(handler_pid, State),
-    SequenceNumber = esmpp_utils:lookup(seq_n, State),
+    Transport = State#conn_state.transport,
+    WorkerPid = State#conn_state.connection_pid,
+    ProcessingPid = State#conn_state.processing_pid,
+    Socket = State#conn_state.socket,
+    HandlerPid = State#conn_state.handler_pid,
+    SequenceNumber = State#conn_state.seq_n,
     send_sms(List, SequenceNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, []).
 
 send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, AccSeq) ->
@@ -203,7 +214,7 @@ send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, T
     case send(Transport, Socket, Bin) of
         ok ->
             esmpp_submit_queue:push_submit(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
-            send_sms(T, get_next_seq_nr(NextSeqNumber), WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
+            send_sms(T, esmpp_utils:get_next_sequence_number(NextSeqNumber), WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
         UnexpectedResponse ->
             UnexpectedResponse
     end;
@@ -216,7 +227,7 @@ loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
         {ok, Bin} ->
             try esmpp_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>) of
                 [{undefined, Name}|_] ->
-                    ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
+                    ?LOG_WARNING("unsupported smpp packet ~p", [Name]),
                     loop_tcp(<<>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid);
                 List ->
                     ok = create_resp(List, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid),
@@ -234,7 +245,7 @@ loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
         {error, Reason} ->
             esmpp_utils:send_notification(HandlerPid, {network_error, WorkerPid, Reason}),
             WorkerPid ! {terminate, Reason}
-    end.              
+    end.
 
 create_resp([], _Transport, _Socket, _WorkerPid, _HandlerPid, _ProcessingPid) ->
     ok;
@@ -288,13 +299,13 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
         outbind ->
             esmpp_utils:send_notification(HandlerPid, {outbind, WorkerPid, Socket});
         generic_nack ->
-            ?LOG_ERROR("Generic nack error code ~p~n", [Status]);
+            ?LOG_ERROR("generic nack error code ~p", [Status]);
         unbind_resp ->
-            ?LOG_ERROR("Unbind session ~p~n", [WorkerPid]),
+            ?LOG_ERROR("unbind session ~p", [WorkerPid]),
             Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin};
         unbind ->
-            ?LOG_ERROR("Unbind session ~p~n", [WorkerPid]),
+            ?LOG_ERROR("unbind session ~p", [WorkerPid]),
             Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin}
     end.
@@ -307,52 +318,37 @@ exam_bind_resp(Socket, Transport) ->
                 0 ->
                     ok;
                 Resp ->
-                    ?LOG_ERROR("Error bind packet code ~p ~n", [Code]),
+                    ?LOG_ERROR("error bind packet code ~p", [Code]),
                     {error, Resp}  
             end;
         {error, Reason} ->
-            ?LOG_ERROR("Error bind, tcp connect fail ~p ~n", [Reason]),  
+            ?LOG_ERROR("error bind, tcp connect fail ~p", [Reason]),
             {error, Reason}
     end.
 
 enquire_link(State) ->
-    EnquireTimeout = esmpp_utils:lookup(enquire_timeout, State)*1000,
-    ok = timer:sleep(EnquireTimeout),
-    Transport = get_transport(State),
-    Socket = esmpp_utils:lookup(socket, State),
-    WorkerPid = esmpp_utils:lookup(worker_pid, State),
-    HandlerPid = esmpp_utils:lookup(handler_pid, State),
+    ok = timer:sleep(State#conn_state.enquire_timeout*1000),
     Bin = esmpp_encoder:encode(enquire_link, State),
-    ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
+    ok = try_send(State#conn_state.transport, State#conn_state.socket, Bin, State#conn_state.connection_pid, State#conn_state.handler_pid),
     enquire_link(accumulate_seq_num(State)).                       
     
-get_transport(Param) ->
-    case esmpp_utils:lookup(transport, Param) of
-        tcp -> gen_tcp;
-        undefined -> gen_tcp;
-        ssl -> ssl
+get_transport(Transport) ->
+    case Transport of
+        undefined ->
+            gen_tcp;
+        tcp ->
+            gen_tcp;
+        ssl ->
+            ssl
     end.
      
 accumulate_seq_num(State) ->
-    replace_seq_num(State, next_seq_num(State)).
+    State#conn_state { seq_n = esmpp_utils:get_next_sequence_number(State#conn_state.seq_n) }.
 
-replace_seq_num(State, SeqNumber) ->
-    esmpp_utils:replace(seq_n, SeqNumber, State).
-
-next_seq_num(State) ->
-    get_next_seq_nr(esmpp_utils:lookup(seq_n, State)).
-
-get_next_seq_nr(Nr) ->
-    case Nr of
-        999999 ->
-            1;
-        _ ->
-            Nr + 1
-    end.
-     
 try_send(Transport, Socket, Bin, WorkerPid, HandlerPid) ->
     case Transport:send(Socket, Bin) of
-        ok -> ok;
+        ok ->
+            ok;
         {error, Reason} ->
             esmpp_utils:send_notification(HandlerPid, {network_error, WorkerPid, Reason}),
             WorkerPid ! {terminate, Reason}, 

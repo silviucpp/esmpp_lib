@@ -8,7 +8,9 @@
     delete/2,
     replace/3,
     send_notification/2,
-    revert_bin_data/1
+    revert_bin_data/1,
+    to_binary/1,
+    get_next_sequence_number/1
 ]).
 
 now() ->
@@ -42,3 +44,18 @@ revert_bin_data(<<H:1/binary, T/binary>>, Acc) ->
 
 send_notification(HandlerPid, Message) ->
     HandlerPid ! Message.
+
+to_binary(Value) when is_binary(Value) ->
+    Value;
+to_binary(Value) when is_list(Value) ->
+    list_to_binary(Value);
+to_binary(Value) when is_integer(Value) ->
+    integer_to_binary(Value).
+
+get_next_sequence_number(Nr) ->
+    case Nr of
+        999999 ->
+            1;
+        _ ->
+            Nr + 1
+    end.
