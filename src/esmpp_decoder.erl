@@ -2,79 +2,135 @@
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
 -include("esmpp_lib.hrl").
--export([decode/2]).
 
-%% API
--spec decode(binary(), list()) -> 
-    list().
-decode(<<>>, List) ->
-    List;
+-define(COMMAND_ID_BIND_RECEIVER, 1).                       %0x00000001
+-define(COMMAND_ID_BIND_TRANSMITTER, 2).                    %0x00000002
+-define(COMMAND_ID_QUERY_SM, 3).                            %0x00000003
+-define(COMMAND_ID_SUBMIT_SM, 4).                           %0x00000004
+-define(COMMAND_ID_DELIVER_SM, 5).                          %0x00000005
+-define(COMMAND_ID_UNBIND, 6).                              %0x00000006
+-define(COMMAND_ID_REPLACE_SM, 7).                          %0x00000007
+-define(COMMAND_ID_CANCEL_SM, 8).                           %0x00000008
+-define(COMMAND_ID_BIND_TRANSCEIVER, 9).                    %0x00000009
+-define(COMMAND_ID_OUTBIND, 11).                            %0x0000000B
+-define(COMMAND_ID_ENQUIRE_LINK, 21).                       %0x00000015
+-define(COMMAND_ID_SUBMIT_MULTI, 33).                       %0x00000021
+-define(COMMAND_ID_ALERT_NOTIFICATION, 258).                %0x00000102
+-define(COMMAND_ID_DATA_SM, 259).                           %0x00000103
+-define(COMMAND_ID_BROADCAST_SM, 273).                      %0x00000111
+-define(COMMAND_ID_QUERY_BROADCAST_SM, 274).                %0x00000112
+-define(COMMAND_ID_CANCEL_BROADCAST_SM, 275).               %0x00000113
+-define(COMMAND_ID_GENERIC_NACK, 2147483648).               %0x80000000
+-define(COMMAND_ID_BIND_RECEIVER_RESP, 2147483649).         %0x80000001
+-define(COMMAND_ID_BIND_TRANSMITTER_RESP, 2147483650).      %0x80000002
+-define(COMMAND_ID_QUERY_SM_RESP, 2147483651).              %0x80000003
+-define(COMMAND_ID_SUBMIT_SM_RESP, 2147483652).             %0x80000004
+-define(COMMAND_ID_DELIVER_SM_RESP, 2147483653).            %0x80000005
+-define(COMMAND_ID_UNBIND_RESP, 2147483654).                %0x80000006
+-define(COMMAND_ID_REPLACE_SM_RESP, 2147483655).            %0x80000007
+-define(COMMAND_ID_CANCEL_SM_RESP, 2147483656).             %0x80000008
+-define(COMMAND_ID_BIND_TRANSCEIVER_RESP, 2147483657).      %0x80000009
+-define(COMMAND_ID_ENQUIRE_LINK_RESP, 2147483669).          %0x80000015
+-define(COMMAND_ID_SUBMIT_MULTI_RESP, 2147483681).          %0x80000021
+-define(COMMAND_ID_DATA_SM_RESP, 2147483907).               %0x80000103
+-define(COMMAND_ID_BROADCAST_SM_RESP, 2147483921).          %0x80000111
+-define(COMMAND_ID_QUERY_BROADCAST_SM_RESP, 2147483922).    %0x80000112
+-define(COMMAND_ID_CANCEL_BROADCAST_SM_RESP, 2147483923).   %0x80000113
+
+-define(SMPP_VERSION_5_0, <<"5.0">>).
+-define(SMPP_VERSION_3_4, <<"3.4">>).
+
+-export([decode/1]).
+
+-spec decode(Bin::binary()) -> list().
+
+decode(Bin) ->
+    decode(Bin, []).
+
+decode(<<>>, Acc) ->
+    Acc;
 decode(<<Length:32/integer, Id:32/integer, Rest/binary>>, Acc) ->
     LenOne = Length - 8,
     <<One:LenOne/binary, Tail/binary>> = Rest,
     Tuple = case Id of 
-        2147483648 -> 
+        ?COMMAND_ID_GENERIC_NACK ->
             generic_nack(One);
-        2147483649 ->
+        ?COMMAND_ID_BIND_RECEIVER_RESP ->
             bind_receiver_resp(One);
-        2147483650 ->
+        ?COMMAND_ID_BIND_TRANSMITTER_RESP ->
             bind_transmitter_resp(One);
-        2147483651 ->
+        ?COMMAND_ID_QUERY_SM_RESP ->
             query_sm_resp(One);
-        2147483652 ->
+        ?COMMAND_ID_SUBMIT_SM_RESP ->
             submit_sm_resp(One);
-        5 ->
+        ?COMMAND_ID_DELIVER_SM ->
             deliver_sm(One);
-        6 ->
+        ?COMMAND_ID_UNBIND ->
             unbind(One);
-        11 ->
+        ?COMMAND_ID_OUTBIND ->
             outbind(One);
-        2147483654 ->
+        ?COMMAND_ID_UNBIND_RESP ->
             unbind_resp(One);
-        2147483655 ->
+        ?COMMAND_ID_REPLACE_SM_RESP ->
             replace_sm_resp(One);
-        2147483656 ->
+        ?COMMAND_ID_CANCEL_SM_RESP ->
             cancel_sm_resp(One);
-        2147483657 ->
+        ?COMMAND_ID_BIND_TRANSCEIVER_RESP ->
             bind_transceiver_resp(One);
-        21 ->
+        ?COMMAND_ID_ENQUIRE_LINK ->
             enquire_link(One);
-        2147483669 ->
+        ?COMMAND_ID_ENQUIRE_LINK_RESP ->
             enquire_link_resp(One);
-        259 ->
+        ?COMMAND_ID_DATA_SM ->
             data_sm(One);
-        2147483907 ->
+        ?COMMAND_ID_DATA_SM_RESP ->
             data_sm_resp(One);
-        258 ->
+        ?COMMAND_ID_ALERT_NOTIFICATION ->
             alert_notification(One);
-        1 ->            {undefined, bind_receiver};
-        2 ->            {undefined, bind_transmitter};
-        3 ->            {undefined, query_sm};
-        4 ->            {undefined, submit_sm};
-        7 ->            {undefined, replace_sm};
-        8 ->            {undefined, cancel_sm};
-        9 ->            {undefined, bind_transceiver};
-        10 ->           {undefined, reserved};
-        12 ->           {undefined, reserved};
-        33 ->           {undefined, submit_multi};
-        256 ->          {undefined, reserved};
-        2147483658 ->   {undefined, reserved};
-        2147483681 ->   {undefined, submit_multi_resp};
-        2147483684 ->   {undefined, reserved};
-        2147483904 ->   {undefined, reserved};
-        257 ->          {undefined, reserved};
-        2147483905 ->   {undefined, reserved};
-        2147483906 ->   {undefined, reserved};
-        260 ->          {undefined, reserved};
-        2147483908 ->   {undefined, reserved};
-        65536 ->        {undefined, reserved}; 
-        2147549184 ->   {undefined, reserved};
-        66048 ->        {undefined, reserved}; 
-        2147549696 ->   {undefined, reserved}
+        ?COMMAND_ID_BROADCAST_SM ->
+            not_implemented(broadcast_sm);
+        ?COMMAND_ID_QUERY_BROADCAST_SM ->
+            not_implemented(query_broadcast_sm);
+        ?COMMAND_ID_CANCEL_BROADCAST_SM ->
+            not_implemented(cancel_broadcast_sm);
+        ?COMMAND_ID_DELIVER_SM_RESP ->
+            not_implemented(deliver_sm_resp);
+        ?COMMAND_ID_BIND_RECEIVER ->
+            not_implemented(bind_receiver);
+        ?COMMAND_ID_BIND_TRANSMITTER ->
+            not_implemented(bind_transmitter);
+        ?COMMAND_ID_QUERY_SM ->
+            not_implemented(query_sm);
+        ?COMMAND_ID_SUBMIT_SM ->
+            not_implemented(submit_sm);
+        ?COMMAND_ID_REPLACE_SM ->
+            not_implemented(replace_sm);
+        ?COMMAND_ID_CANCEL_SM ->
+            not_implemented(cancel_sm);
+        ?COMMAND_ID_BIND_TRANSCEIVER ->
+            not_implemented(bind_transceiver);
+        ?COMMAND_ID_SUBMIT_MULTI ->
+            not_implemented(submit_multi);
+        ?COMMAND_ID_SUBMIT_MULTI_RESP ->
+            not_implemented(submit_multi_resp);
+        ?COMMAND_ID_BROADCAST_SM_RESP ->
+            not_implemented(broadcast_sm_resp);
+        ?COMMAND_ID_QUERY_BROADCAST_SM_RESP ->
+            not_implemented(query_broadcast_sm_resp);
+        ?COMMAND_ID_CANCEL_BROADCAST_SM_RESP ->
+            not_implemented(cancel_broadcast_sm_resp);
+        _ ->
+            reserved_command()
     end,
     decode(Tail, [Tuple|Acc]).
 
-%% INTERNAL
+% internal functions
+
+not_implemented(Command) ->
+    {undefined, Command}.
+
+reserved_command() ->
+    {undefined, reserved}.
 
 bind_transmitter_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
     case Status of
@@ -131,17 +187,29 @@ deliver_sm(<<0:32/integer, SeqNum:32/integer, Rest/binary>>) ->
     Len3 = byte_size(parse_c_octets(Tail2, []))+1,
     <<_Shed:Len3/binary, Tail3/binary>> = Tail2,
     Len4 = byte_size(parse_c_octets(Tail3, []))+1,
-    <<_Val:Len4/binary, RegDel:8/integer, _Repl:8/integer, DataC:8/integer, 
-        _SmD:8/integer, SmL:8/integer, Msg:SmL/binary, Opt/binary>> = Tail3,  
+    <<_Val:Len4/binary, RegDel:8/integer, _Repl:8/integer, DataC:8/integer, _SmD:8/integer, SmL:8/integer, Msg:SmL/binary, Opt/binary>> = Tail3,
     SourceAddr = parse_c_octets(Saddr, []),
     ServType = parse_c_octets(SrvT, []),
     DestAddr = parse_c_octets(Daddr, []),
     List = get_tag(Opt, []),
-    {deliver_sm, 0, SeqNum, [{source_addr, SourceAddr}, {destination_addr, DestAddr}, 
-    {service_type, ServType}, {source_addr_ton, STon}, {source_addr_npi, SNpi}, 
-    {dest_addr_ton, DTon}, {dest_addr_npi, DNpi},
-    {short_message, Msg}, {data_coding, DataC}, {registered_delivery, RegDel}, 
-    {protocol_id, ProtId}, {priority_flag, PrFl}, {esm_class, EsmCl}|List]}.
+
+    Params = [
+        {source_addr, SourceAddr},
+        {destination_addr, DestAddr},
+        {service_type, ServType},
+        {source_addr_ton, STon},
+        {source_addr_npi, SNpi},
+        {dest_addr_ton, DTon},
+        {dest_addr_npi, DNpi},
+        {short_message, Msg},
+        {data_coding, DataC},
+        {registered_delivery, RegDel},
+        {protocol_id, ProtId},
+        {priority_flag, PrFl},
+        {esm_class, EsmCl}|List
+    ],
+
+    {deliver_sm, 0, SeqNum, Params}.
 
 data_sm(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
     Len = byte_size(parse_c_octets(Rest, []))+1,
@@ -154,10 +222,21 @@ data_sm(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) ->
     DestAddr = parse_c_octets(Daddr, []),
     ServType = parse_c_octets(SrvT, []),
     List = get_tag(Opt, []),
-    {data_sm, Status, SeqNum, [{source_addr, SourceAddr}, {data_coding, DataC},
-    {service_type, ServType}, {source_addr_ton, STon}, {source_addr_npi, SNpi}, 
-    {dest_addr_ton, DTon}, {dest_addr_npi, DNpi},{registered_delivery, RDel},
-    {destination_addr, DestAddr}, {esm_class, EsmCl}|List]}.
+
+    Params = [
+        {source_addr, SourceAddr},
+        {data_coding, DataC},
+        {service_type, ServType},
+        {source_addr_ton, STon},
+        {source_addr_npi, SNpi},
+        {dest_addr_ton, DTon},
+        {dest_addr_npi, DNpi},
+        {registered_delivery, RDel},
+        {destination_addr, DestAddr},
+        {esm_class, EsmCl} | List
+    ],
+
+    {data_sm, Status, SeqNum, Params}.
 
 data_sm_resp(<<Status:32/integer, SeqNum:32/integer, Rest/binary>>) -> 
     case byte_size(Rest)>0 of
@@ -219,11 +298,13 @@ get_smpp_version(Rest) ->
     case binary:part(Rest, {byte_size(Rest), -5}) of 
         <<528:16/integer, 1:16/integer, Ver:8/integer>> -> 
             case Ver of
-                80 -> "5.0";
-                52 -> "3.4"
+                80 ->
+                    ?SMPP_VERSION_5_0;
+                52 ->
+                    ?SMPP_VERSION_3_4
             end;
         _ ->
-            "3.4"
+            ?SMPP_VERSION_3_4
     end. 
             
 parse_c_octets(<<H:1/binary, T/binary>>, List) ->

@@ -214,7 +214,7 @@ send_sms([], NextSeqNumber, _WorkerPid, _ProcessingPid, _Socket, _HandlerPid, _T
 loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
-            try esmpp_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>, []) of
+            try esmpp_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>) of
                 [{undefined, Name}|_] ->
                     ?LOG_WARNING("Unsupported smpp packet ~p~n", [Name]),
                     loop_tcp(<<>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid);
@@ -302,7 +302,7 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
 exam_bind_resp(Socket, Transport) ->
     case Transport:recv(Socket, 0, 5000) of 
         {ok, Bin} ->
-            [{_Name, Code, _SeqNum, _List}] = esmpp_decoder:decode(Bin, []),
+            [{_Name, Code, _SeqNum, _List}] = esmpp_decoder:decode(Bin),
             case Code of 
                 0 ->
                     ok;
