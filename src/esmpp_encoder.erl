@@ -1,7 +1,7 @@
 -module(esmpp_encoder).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
--include("esmpp_lib.hrl").
+-include("esmpp_encoder.hrl").
 
 -export([encode/2, encode/3, number_parts/2]).
 

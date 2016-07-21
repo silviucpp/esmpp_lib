@@ -1,7 +1,7 @@
 -module(esmpp_submit_queue).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
--include("esmpp_lib.hrl").
+-include("esmpp.hrl").
 
 -behaviour(gen_server).
 

@@ -1,7 +1,7 @@
 -module(esmpp_connection).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
--include("esmpp_lib.hrl").
+-include("esmpp.hrl").
 
 -behaviour(gen_server).
 -define(SERVER, ?MODULE).

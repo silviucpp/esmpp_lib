@@ -1,7 +1,7 @@
 -module(esmpp_decoder).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
--include("esmpp_lib.hrl").
+-include("esmpp.hrl").
 
 -define(COMMAND_ID_BIND_RECEIVER, 1).                       %0x00000001
 -define(COMMAND_ID_BIND_TRANSMITTER, 2).                    %0x00000002
