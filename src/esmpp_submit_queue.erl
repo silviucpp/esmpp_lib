@@ -1,4 +1,4 @@
--module(esmpp_lib_submit_processing).
+-module(esmpp_submit_queue).
 -author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
 -include("esmpp_lib.hrl").
@@ -10,7 +10,7 @@
 -define(MIN_EXPIRE_ACCURACY_MS, 5000).
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([processing_submit/4, push_submit/3]).
+-export([process_submit/4, push_submit/3]).
 
 start_link(State) ->
     gen_server:start_link(?MODULE, State, []).
@@ -23,7 +23,7 @@ start_link(State) ->
     timer_ref
 }).
 
-processing_submit(Pid, SeqNum, List, OperationHandler) ->
+process_submit(Pid, SeqNum, List, OperationHandler) ->
     Pid ! {processing_submit, SeqNum, OperationHandler, List}.
 
 push_submit(Pid, SeqNum, Ts) ->

@@ -40,7 +40,7 @@ unbind(WorkerPid) ->
 init(Param) ->
     WorkerPid = self(),
     erlang:send_after(10, self(), {bind, esmpp_utils:lookup(mode, Param)}),
-    {ok, ProcessingPid} = esmpp_lib_submit_processing:start_link([{parent_pid, WorkerPid} | Param]),
+    {ok, ProcessingPid} = esmpp_submit_queue:start_link([{parent_pid, WorkerPid} | Param]),
     State = [{processing_pid, ProcessingPid}, {sar, 0}, {seq_n, 0}, {worker_pid, WorkerPid} | Param],
     {ok,  State}.
 
@@ -202,7 +202,7 @@ send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, T
 
     case send(Transport, Socket, Bin) of
         ok ->
-            esmpp_lib_submit_processing:push_submit(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
+            esmpp_submit_queue:push_submit(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
             send_sms(T, get_next_seq_nr(NextSeqNumber), WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
         UnexpectedResponse ->
             UnexpectedResponse
@@ -264,11 +264,11 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             esmpp_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         submit_sm_resp ->
             Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
-            esmpp_lib_submit_processing:processing_submit(ProcessingPid, SeqNum, Params, submit_sm_resp),
+            esmpp_submit_queue:process_submit(ProcessingPid, SeqNum, Params, submit_sm_resp),
             ok;
         data_sm_resp ->
             Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
-            esmpp_lib_submit_processing:processing_submit(ProcessingPid, SeqNum, Params, data_sm_resp),
+            esmpp_submit_queue:process_submit(ProcessingPid, SeqNum, Params, data_sm_resp),
             ok; 
         data_sm ->                                                                                  
             MsgId = esmpp_utils:lookup(receipted_message_id, List),

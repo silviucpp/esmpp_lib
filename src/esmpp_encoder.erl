@@ -254,7 +254,7 @@ assemble_submit({SarTotSeg, [H|T]}, SarRefNum, List, Param, Encode, Acc) ->
 get_text_by_code(Encode, Bin) ->
     case Encode of 
         0 ->
-            esmpp_lib_latin1_to_gsm:latin1_to_gsm(Bin, <<>>);
+            esmpp_data_coding:latin1_to_gsm(Bin);
         8 ->
 	        unicode:characters_to_binary(Bin, utf8, utf16);
         _ ->
