@@ -51,7 +51,6 @@ init(Param) ->
         connection_pid = ConnectionPid,
         sar = 0,
         seq_n = 0,
-
         host = esmpp_utils:lookup(host, Param),
         port = esmpp_utils:lookup(port, Param),
         password = esmpp_utils:lookup(password, Param),
@@ -124,9 +123,12 @@ handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({unbind, []}, State) ->
-    Bin = esmpp_encoder:encode(unbind, State),
-    ok = try_send(State#conn_state.transport, State#conn_state.socket, Bin, State#conn_state.connection_pid, State#conn_state.handler_pid),
-    esmpp_utils:send_notification(State#conn_state.handler_pid, {unbind, State#conn_state.connection_pid}),
+    case send(State#conn_state.transport, State#conn_state.socket, esmpp_encoder:encode(unbind, State)) of
+        ok ->
+            esmpp_utils:send_notification(State#conn_state.handler_pid, {unbind, State#conn_state.connection_pid});
+        _ ->
+            ok
+    end,
     State#conn_state.connection_pid ! {terminate, unbind},
     {noreply, accumulate_seq_num(State)}; 
 handle_cast(_Msg, State) ->
@@ -256,10 +258,10 @@ create_resp([H|T], Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
         ok ->
             ok;
         {close_session, Bin} ->
-            ok = try_send(Transport, Socket, Bin, WorkerPid, HandlerPid),
+            send(Transport, Socket, Bin),
             esmpp_utils:send_notification(HandlerPid, {network_error, Socket, close_session});
         _ ->
-            ok = try_send(Transport, Socket, Resp, WorkerPid, HandlerPid)
+            send(Transport, Socket, Resp)
     end,
     create_resp(T, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid).
 
@@ -329,9 +331,13 @@ exam_bind_resp(Socket, Transport) ->
 enquire_link(State) ->
     ok = timer:sleep(State#conn_state.enquire_timeout*1000),
     Bin = esmpp_encoder:encode(enquire_link, State),
-    ok = try_send(State#conn_state.transport, State#conn_state.socket, Bin, State#conn_state.connection_pid, State#conn_state.handler_pid),
-    enquire_link(accumulate_seq_num(State)).                       
-    
+    case send(State#conn_state.transport, State#conn_state.socket, Bin) of
+        ok ->
+            enquire_link(accumulate_seq_num(State));
+        _ ->
+            ok
+    end.
+
 get_transport(Transport) ->
     case Transport of
         undefined ->
@@ -344,16 +350,6 @@ get_transport(Transport) ->
      
 accumulate_seq_num(State) ->
     State#conn_state { seq_n = esmpp_utils:get_next_sequence_number(State#conn_state.seq_n) }.
-
-try_send(Transport, Socket, Bin, WorkerPid, HandlerPid) ->
-    case Transport:send(Socket, Bin) of
-        ok ->
-            ok;
-        {error, Reason} ->
-            esmpp_utils:send_notification(HandlerPid, {network_error, WorkerPid, Reason}),
-            WorkerPid ! {terminate, Reason}, 
-            ok
-    end.
 
 send(Transport, Socket, Bin) ->
     case Transport:send(Socket, Bin) of
