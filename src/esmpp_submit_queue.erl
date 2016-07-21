@@ -1,5 +1,4 @@
 -module(esmpp_submit_queue).
--author('Alexander Zhuk <aleksandr.zhuk@privatbank.ua>').
 
 -include("esmpp.hrl").
 
@@ -9,7 +8,7 @@
 -define(MIN_EXPIRE_ACCURACY_MS, 5000).
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([process_submit/4, push_submit/3]).
+-export([process/4, push/3]).
 
 start_link(State) ->
     gen_server:start_link(?MODULE, State, []).
@@ -22,10 +21,10 @@ start_link(State) ->
     timer_ref
 }).
 
-process_submit(Pid, SeqNum, List, OperationHandler) ->
+process(Pid, SeqNum, List, OperationHandler) ->
     Pid ! {processing_submit, SeqNum, OperationHandler, List}.
 
-push_submit(Pid, SeqNum, Ts) ->
+push(Pid, SeqNum, Ts) ->
     Pid ! {push_submit, {SeqNum, Ts}}.
 
 init([HandlerPid, ConnectionPid, SubmitTimeout]) ->
@@ -35,7 +34,7 @@ init([HandlerPid, ConnectionPid, SubmitTimeout]) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 handle_cast(Msg, State) ->
-    ?LOG_DEBUG("Unknown cast msg ~p~n", [Msg]),
+    ?LOG_DEBUG("unknown cast msg ~p", [Msg]),
     {noreply, State}.
 
 handle_info({processing_submit, SeqNum, MessageTag, List}, State) ->
@@ -73,7 +72,7 @@ handle_info(check_not_ack_submit, State) ->
 
     {noreply, State#state{submit_check = NewSubmitList, timer_ref = TimerRef}};
 handle_info(Info, State) ->
-    ?LOG_DEBUG("Unknown info msg ~p~n", [Info]),
+    ?LOG_DEBUG("unknown info msg ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->

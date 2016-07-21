@@ -215,7 +215,7 @@ send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, T
 
     case send(Transport, Socket, Bin) of
         ok ->
-            esmpp_submit_queue:push_submit(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
+            esmpp_submit_queue:push(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
             send_sms(T, esmpp_utils:get_next_sequence_number(NextSeqNumber), WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
         UnexpectedResponse ->
             UnexpectedResponse
@@ -277,11 +277,11 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             esmpp_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         submit_sm_resp ->
             Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
-            esmpp_submit_queue:process_submit(ProcessingPid, SeqNum, Params, submit_sm_resp),
+            esmpp_submit_queue:process(ProcessingPid, SeqNum, Params, submit_sm_resp),
             ok;
         data_sm_resp ->
             Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
-            esmpp_submit_queue:process_submit(ProcessingPid, SeqNum, Params, data_sm_resp),
+            esmpp_submit_queue:process(ProcessingPid, SeqNum, Params, data_sm_resp),
             ok; 
         data_sm ->                                                                                  
             MsgId = esmpp_utils:lookup(receipted_message_id, List),
