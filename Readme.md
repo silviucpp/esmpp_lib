@@ -76,7 +76,10 @@ Can be done using one of `submit_sm` or `data_sm` methods
 
 Example:
 
-`esmpp_connection:submit(Pid, [{source_addr, <<"3423443243">>}, {dest_addr, <<"4324342434">>}, {text, <<"hello world">>}]).`
+```
+Params = [{source_addr, <<"3423443243">>}, {dest_addr, <<"4324342434">>}, {text, <<"hello world">>}],
+esmpp_connection:submit(Pid, Params).
+```
 
 Returns : 
 
