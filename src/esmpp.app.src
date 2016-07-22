@@ -1,6 +1,6 @@
-{application, esmpp_lib, [
-    {description, "SMPP library"},
-    {vsn, "0.8.14"},
+{application, esmpp, [
+    {description, "SMPP library for Erlang"},
+    {vsn, "1.0"},
     {registered, []},
     {modules, []},
     {applications, [
@@ -11,6 +11,6 @@
         ssl,
         lager
     ]},
-    {mod, { esmpp_lib_app, []}},
+    {mod, {esmpp_connection, []}},
     {env, []}
 ]}.
