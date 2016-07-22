@@ -89,7 +89,10 @@ Can be done using `query_sm` method:
 
 Example:
 
-`esmpp_connection:query_sm(Pid, [{source_addr, <<"3423443243">>}, {message_id, <<"35445">>}]).`
+```erl
+Params = [{source_addr, <<"3423443243">>}, {message_id, <<"35445">>}],
+esmpp_connection:query_sm(Pid, Params).
+```
 
 Returns : 
 
@@ -102,7 +105,10 @@ Can be done using `replace_sm` method:
 
 Example:
 
-`esmpp_connection:replace_sm(Pid, [{source_addr, <<"3423443243">>}, {message_id, <<"35445">>}, {text, <<"new body">>}]).`
+```erl
+Params = [{source_addr, <<"3423443243">>}, {message_id, <<"35445">>}, {text, <<"new body">>}],
+esmpp_connection:replace_sm(Pid, Params).
+```
 
 Returns : 
 
@@ -115,7 +121,10 @@ Can be done using `cancel_sm` method:
 
 Example:
 
-`esmpp_connection:cancel_sm(Pid, [{source_addr, <<"3423443243">>}, {dest_addr, <<"4324342434">>}, {message_id, <<"35445">>}]).`
+```erl
+Params = [{source_addr, <<"3423443243">>}, {dest_addr, <<"4324342434">>}, {message_id, <<"35445">>}],
+esmpp_connection:cancel_sm(Pid, Params).
+```
 
 Returns : 
 
