@@ -144,14 +144,16 @@ handle_info(binding, State) ->
             esmpp_utils:send_notification(State#conn_state.handler_pid, {bind_completed, State#conn_state.connection_pid}),
 
             ListenPid = spawn_link(fun() -> loop_tcp(<<>>, State#conn_state.transport, Socket, State#conn_state.connection_pid, State#conn_state.handler_pid, State#conn_state.processing_pid) end),
+            State2 = State#conn_state {socket = Socket, listen_pid = ListenPid, seq_n = esmpp_utils:get_next_sequence_number(State#conn_state.seq_n)},
+
             case State#conn_state.enquire_timeout of
                 undefined ->
                     ok;
                 _ ->
-                    spawn_link(fun() -> enquire_link(accumulate_seq_num(State)) end)
+                    spawn_link(fun() -> enquire_link(State2) end)
             end,
 
-            {noreply, State#conn_state {socket = Socket, listen_pid = ListenPid, seq_n = esmpp_utils:get_next_sequence_number(State#conn_state.seq_n)}}
+            {noreply, State2}
     end;
 handle_info({update_sar, Value}, State) ->
     {noreply, State#conn_state{sar = Value}};
