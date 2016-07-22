@@ -9,7 +9,7 @@
     connection_pid,
     sar,
     seq_n,
-
+    %smpp session info's
     host,
     port,
     password,
