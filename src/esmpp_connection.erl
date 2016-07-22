@@ -137,7 +137,7 @@ handle_cast(_Msg, State) ->
 handle_info(binding, State) ->
     case bind(State) of
         {error, Reason} ->
-            esmpp_utils:send_notification(State#conn_state.handler_pid, {network_error, State#conn_state.connection_pid, Reason}),
+            esmpp_utils:send_notification(State#conn_state.handler_pid, {bind_failed, State#conn_state.connection_pid, Reason}),
             State#conn_state.connection_pid ! {terminate, Reason},
             {noreply, State};
         Socket ->
@@ -226,29 +226,29 @@ send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, T
 send_sms([], NextSeqNumber, _WorkerPid, _ProcessingPid, _Socket, _HandlerPid, _Transport, AccSeq) ->
     {ok, NextSeqNumber, lists:reverse(AccSeq)}.
 
-loop_tcp(Buffer, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
+loop_tcp(Buffer, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
     case Transport:recv(Socket, 0) of 
         {ok, Bin} ->
             try esmpp_decoder:decode(<<Buffer/bitstring, Bin/bitstring>>) of
                 [{undefined, Name}|_] ->
                     ?LOG_WARNING("unsupported smpp packet ~p", [Name]),
-                    loop_tcp(<<>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid);
+                    loop_tcp(<<>>, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid);
                 List ->
-                    ok = create_resp(List, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid),
-                    loop_tcp(<<>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid)
+                    ok = create_resp(List, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid),
+                    loop_tcp(<<>>, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid)
             catch
                 _Class:Reason ->
-                    case byte_size(Bin)>1535 of
+                    case byte_size(Bin) > 1535 of
                         true ->
-                            esmpp_utils:send_notification(HandlerPid, {decoder_error, WorkerPid, Bin}),
-                            WorkerPid ! {terminate, Reason};
+                            ?LOG_ERROR("failed to decode ~p on connection ~p", [Bin, ConnectionPid]),
+                            ConnectionPid ! {terminate, Reason};
                         false ->
-                            loop_tcp(<<Buffer/bitstring, Bin/bitstring>>, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid)
+                            loop_tcp(<<Buffer/bitstring, Bin/bitstring>>, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid)
                     end
             end;
         {error, Reason} ->
-            esmpp_utils:send_notification(HandlerPid, {network_error, WorkerPid, Reason}),
-            WorkerPid ! {terminate, Reason}
+            ?LOG_ERROR("connection: ~p read error: ~p", [ConnectionPid, Reason]),
+            ConnectionPid ! {terminate, Reason}
     end.
 
 create_resp([], _Transport, _Socket, _WorkerPid, _HandlerPid, _ProcessingPid) ->
@@ -260,14 +260,13 @@ create_resp([H|T], Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
         ok ->
             ok;
         {close_session, Bin} ->
-            send(Transport, Socket, Bin),
-            esmpp_utils:send_notification(HandlerPid, {network_error, Socket, close_session});
+            send(Transport, Socket, Bin);
         _ ->
             send(Transport, Socket, Resp)
     end,
     create_resp(T, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid).
 
-assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
+assemble_resp({Name, Status, SeqNum, List}, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
     case Name of
         enquire_link -> 
             esmpp_encoder:encode(enquire_link_resp, [], [{sequence_number, SeqNum}]);
@@ -275,7 +274,7 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             ok; 
         deliver_sm -> 
             MsgId = esmpp_utils:lookup(receipted_message_id, List),
-            esmpp_utils:send_notification(HandlerPid, {deliver_sm, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            esmpp_utils:send_notification(HandlerPid, {deliver_sm, ConnectionPid, [{sequence_number, SeqNum}, {command_status, Status} | List]}),
             esmpp_encoder:encode(deliver_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         submit_sm_resp ->
             Params = [{sequence_number, SeqNum}, {command_status, Status} | List],
@@ -287,29 +286,29 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, WorkerPid, HandlerPid, Proce
             ok; 
         data_sm ->                                                                                  
             MsgId = esmpp_utils:lookup(receipted_message_id, List),
-            esmpp_utils:send_notification(HandlerPid, {data_sm, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            esmpp_utils:send_notification(HandlerPid, {data_sm, ConnectionPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             esmpp_encoder:encode(data_sm_resp, [], [{sequence_number, SeqNum}, {message_id, MsgId}, {status, 0}]);
         query_sm_resp ->
-            esmpp_utils:send_notification(HandlerPid, {query_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            esmpp_utils:send_notification(HandlerPid, {query_sm_resp, ConnectionPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             ok;
         replace_sm_resp ->
-            esmpp_utils:send_notification(HandlerPid, {replace_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            esmpp_utils:send_notification(HandlerPid, {replace_sm_resp, ConnectionPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             ok;
         cancel_sm_resp ->
-            esmpp_utils:send_notification(HandlerPid, {cancel_sm_resp, WorkerPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
+            esmpp_utils:send_notification(HandlerPid, {cancel_sm_resp, ConnectionPid, [{sequence_number, SeqNum}, {command_status, Status}|List]}),
             ok;
         alert_notification ->
             ok;
         outbind ->
-            esmpp_utils:send_notification(HandlerPid, {outbind, WorkerPid, Socket});
+            esmpp_utils:send_notification(HandlerPid, {outbind, ConnectionPid, Socket});
         generic_nack ->
             ?LOG_ERROR("generic nack error code ~p", [Status]);
         unbind_resp ->
-            ?LOG_ERROR("unbind session ~p", [WorkerPid]),
+            ?LOG_ERROR("unbind session ~p", [ConnectionPid]),
             Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin};
         unbind ->
-            ?LOG_ERROR("unbind session ~p", [WorkerPid]),
+            ?LOG_ERROR("unbind session ~p", [ConnectionPid]),
             Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin}
     end.

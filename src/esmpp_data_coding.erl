@@ -2,7 +2,7 @@
 
 -export([latin1_to_gsm/1]).
 
--spec latin1_to_gsm(binary()) -> binary().
+-spec latin1_to_gsm(Bin::binary()) -> binary().
 
 latin1_to_gsm(Bin) ->
     latin1_to_gsm(Bin, <<>>).

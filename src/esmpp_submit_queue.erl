@@ -17,7 +17,7 @@ start_link(State) ->
     submit_check,
     submit_timeout_ms,
     handler_pid,
-    parent_pid,
+    connection_pid,
     timer_ref
 }).
 
@@ -29,7 +29,7 @@ push(Pid, SeqNum, Ts) ->
 
 init([HandlerPid, ConnectionPid, SubmitTimeout]) ->
     SubmitTimeoutMs = SubmitTimeout*1000,
-    {ok, #state{submit_check = [], submit_timeout_ms = SubmitTimeoutMs, handler_pid = HandlerPid, parent_pid = ConnectionPid}}.
+    {ok, #state{submit_check = [], submit_timeout_ms = SubmitTimeoutMs, handler_pid = HandlerPid, connection_pid = ConnectionPid}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -45,7 +45,7 @@ handle_info({processing_submit, SeqNum, MessageTag, List}, State) ->
             ?LOG_ERROR("ignore processing_submit for unknown seq_number: ~p", [SeqNum]),
             {noreply, State};
         _ ->
-            esmpp_utils:send_notification(State#state.handler_pid, {MessageTag, State#state.parent_pid, List}),
+            esmpp_utils:send_notification(State#state.handler_pid, {MessageTag, State#state.connection_pid, List}),
             NewSubmitList = esmpp_utils:delete(SeqNum, State#state.submit_check),
             {noreply, State#state{submit_check = NewSubmitList}}
     end;
@@ -91,7 +91,7 @@ check_submit_expired(_State, _NowMs, [], Acc, NewTs) ->
 check_submit_expired(State, NowMs, [{SeqNum, MessageTs} = H|T], Acc, AccTs) ->
     case NowMs - MessageTs >= State#state.submit_timeout_ms of
         true ->
-            esmpp_utils:send_notification(State#state.handler_pid, {submit_error, State#state.parent_pid, SeqNum}),
+            esmpp_utils:send_notification(State#state.handler_pid, {submit_error, State#state.connection_pid, SeqNum}),
             check_submit_expired(State, NowMs, T, Acc, AccTs);
         _ ->
             check_submit_expired(State, NowMs, T, [H|Acc], get_new_timestamp(AccTs, MessageTs))
