@@ -123,13 +123,15 @@ handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({unbind, []}, State) ->
+    ?LOG_INFO(<<"send unbind on connection: ~p">>, [State#conn_state.connection_pid]),
     case send(State#conn_state.transport, State#conn_state.socket, esmpp_encoder:encode(unbind, State)) of
         ok ->
             esmpp_utils:send_notification(State#conn_state.handler_pid, {unbind, State#conn_state.connection_pid});
         _ ->
             ok
     end,
-    State#conn_state.connection_pid ! {terminate, unbind},
+    %we are the one asking for closing the connection. make less noise in logs by closing normal
+    State#conn_state.connection_pid ! {terminate, normal},
     {noreply, accumulate_seq_num(State)}; 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -255,13 +257,13 @@ create_resp([], _Transport, _Socket, _ConnectionPid, _HandlerPid, _ProcessingPid
     ok;
 create_resp([H|T], Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
 	{Name, Code, SeqNum, List} = H,
-    Resp = assemble_resp({Name, Code, SeqNum, List}, ConnectionPid, HandlerPid, ProcessingPid),
-    case Resp of
+
+    case assemble_resp({Name, Code, SeqNum, List}, ConnectionPid, HandlerPid, ProcessingPid) of
         ok ->
             ok;
         {close_session, Bin} ->
             send(Transport, Socket, Bin);
-        _ ->
+        Resp ->
             send(Transport, Socket, Resp)
     end,
     create_resp(T, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid).
@@ -304,11 +306,10 @@ assemble_resp({Name, Status, SeqNum, List}, ConnectionPid, HandlerPid, Processin
         generic_nack ->
             ?LOG_ERROR("generic nack error code ~p", [Status]);
         unbind_resp ->
-            ?LOG_ERROR("unbind session ~p", [ConnectionPid]),
-            Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
-            {close_session, Bin};
+        	%we don't care if we get this or not after sending the unbind we close the connection instantly
+        	ok;
         unbind ->
-            ?LOG_ERROR("unbind session ~p", [ConnectionPid]),
+            ?LOG_ERROR("received unbind connection ~p", [ConnectionPid]),
             Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin}
     end.
