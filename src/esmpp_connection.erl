@@ -251,11 +251,11 @@ loop_tcp(Buffer, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
             ConnectionPid ! {terminate, Reason}
     end.
 
-create_resp([], _Transport, _Socket, _WorkerPid, _HandlerPid, _ProcessingPid) ->
+create_resp([], _Transport, _Socket, _ConnectionPid, _HandlerPid, _ProcessingPid) ->
     ok;
-create_resp([H|T], Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
+create_resp([H|T], Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
 	{Name, Code, SeqNum, List} = H,
-    Resp = assemble_resp({Name, Code, SeqNum, List}, Socket, WorkerPid, HandlerPid, ProcessingPid),
+    Resp = assemble_resp({Name, Code, SeqNum, List}, ConnectionPid, HandlerPid, ProcessingPid),
     case Resp of
         ok ->
             ok;
@@ -264,9 +264,9 @@ create_resp([H|T], Transport, Socket, WorkerPid, HandlerPid, ProcessingPid) ->
         _ ->
             send(Transport, Socket, Resp)
     end,
-    create_resp(T, Transport, Socket, WorkerPid, HandlerPid, ProcessingPid).
+    create_resp(T, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid).
 
-assemble_resp({Name, Status, SeqNum, List}, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
+assemble_resp({Name, Status, SeqNum, List}, ConnectionPid, HandlerPid, ProcessingPid) ->
     case Name of
         enquire_link -> 
             esmpp_encoder:encode(enquire_link_resp, [], [{sequence_number, SeqNum}]);
@@ -300,7 +300,7 @@ assemble_resp({Name, Status, SeqNum, List}, Socket, ConnectionPid, HandlerPid, P
         alert_notification ->
             ok;
         outbind ->
-            esmpp_utils:send_notification(HandlerPid, {outbind, ConnectionPid, Socket});
+            esmpp_utils:send_notification(HandlerPid, {outbind, ConnectionPid});
         generic_nack ->
             ?LOG_ERROR("generic nack error code ~p", [Status]);
         unbind_resp ->
