@@ -9,34 +9,34 @@
 
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([update_sar/2]).
--export([submit/2, data_sm/2, cancel_sm/2, replace_sm/2, query_sm/2, unbind/1]).
+-export([submit_sm/2, data_sm/2, cancel_sm/2, replace_sm/2, query_sm/2, unbind/1]).
 
 start_link(Param) ->
     gen_server:start_link(?MODULE, Param, []).
 
--spec submit(WorkerPid::pid(), List::list()) -> {ok, SegmentsSequenceNumber::list(), Segments::integer()} | {error, Reason::term()}.
-submit(WorkerPid, List) ->
-    gen_server:call(WorkerPid, {submit, List}, infinity).
+-spec submit_sm(ConnectionPid::pid(), List::list()) -> {ok, SegmentsSequenceNumber::list(), Segments::integer()} | {error, Reason::term()}.
+submit_sm(ConnectionPid, List) ->
+    gen_server:call(ConnectionPid, {submit_sm, List}, infinity).
 
--spec data_sm(WorkerPid::pid(), List::list()) -> {ok, SegmentsSequenceNumber::list(), Segments::integer()} | {error, Reason::term()}.
-data_sm(WorkerPid, List) ->
-    gen_server:call(WorkerPid, {data_sm, List}, infinity).
+-spec data_sm(ConnectionPid::pid(), List::list()) -> {ok, SegmentsSequenceNumber::list(), Segments::integer()} | {error, Reason::term()}.
+data_sm(ConnectionPid, List) ->
+    gen_server:call(ConnectionPid, {data_sm, List}, infinity).
 
--spec query_sm(WorkerPid::pid(), List::list()) -> {ok, SequenceNumber::integer()} | {error, Reason::term()}.
-query_sm(WorkerPid, List) ->
-    gen_server:call(WorkerPid, {query_sm, List}).
+-spec query_sm(ConnectionPid::pid(), List::list()) -> {ok, SequenceNumber::integer()} | {error, Reason::term()}.
+query_sm(ConnectionPid, List) ->
+    gen_server:call(ConnectionPid, {query_sm, List}).
 
--spec replace_sm(WorkerPid::pid(), List::list()) ->  {ok, SequenceNumber::integer()} | {error, Reason::term()}.
-replace_sm(WorkerPid, List) ->
-    gen_server:call(WorkerPid, {replace_sm, List}).
+-spec replace_sm(ConnectionPid::pid(), List::list()) ->  {ok, SequenceNumber::integer()} | {error, Reason::term()}.
+replace_sm(ConnectionPid, List) ->
+    gen_server:call(ConnectionPid, {replace_sm, List}).
 
--spec cancel_sm(WorkerPid::pid(), List::list()) -> {ok, SequenceNumber::integer()} | {error, Reason::term()}.
-cancel_sm(WorkerPid, List) ->
-    gen_server:call(WorkerPid, {cancel_sm, List}).
+-spec cancel_sm(ConnectionPid::pid(), List::list()) -> {ok, SequenceNumber::integer()} | {error, Reason::term()}.
+cancel_sm(ConnectionPid, List) ->
+    gen_server:call(ConnectionPid, {cancel_sm, List}).
 
 -spec unbind(pid()) -> ok.  
-unbind(WorkerPid) ->
-    gen_server:cast(WorkerPid, {unbind, []}).
+unbind(ConnectionPid) ->
+    gen_server:cast(ConnectionPid, {unbind, []}).
 
 init(Param) ->
     ConnectionPid = self(),
@@ -74,7 +74,7 @@ init(Param) ->
 
     {ok, State}.
 
-handle_call({submit, List}, _From, State) ->
+handle_call({submit_sm, List}, _From, State) ->
     SmsList = esmpp_encoder:encode(submit_sm, State, List),
 
     case send_sms(SmsList, State) of
@@ -124,12 +124,7 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({unbind, []}, State) ->
     ?LOG_INFO(<<"send unbind on connection: ~p">>, [State#conn_state.connection_pid]),
-    case send(State#conn_state.transport, State#conn_state.socket, esmpp_encoder:encode(unbind, State)) of
-        ok ->
-            esmpp_utils:send_notification(State#conn_state.handler_pid, {unbind, State#conn_state.connection_pid});
-        _ ->
-            ok
-    end,
+    send(State#conn_state.transport, State#conn_state.socket, esmpp_encoder:encode(unbind, State)),
     %we are the one asking for closing the connection. make less noise in logs by closing normal
     State#conn_state.connection_pid ! {terminate, normal},
     {noreply, accumulate_seq_num(State)}; 
@@ -207,25 +202,25 @@ handle_bind(Resp, Socket, Transport) ->
 
 send_sms(List, State) ->
     Transport = State#conn_state.transport,
-    WorkerPid = State#conn_state.connection_pid,
+    ConnectionPid = State#conn_state.connection_pid,
     ProcessingPid = State#conn_state.processing_pid,
     Socket = State#conn_state.socket,
     HandlerPid = State#conn_state.handler_pid,
     SequenceNumber = State#conn_state.seq_n,
-    send_sms(List, SequenceNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, []).
+    send_sms(List, SequenceNumber, ConnectionPid, ProcessingPid, Socket, HandlerPid, Transport, []).
 
-send_sms([Bin|T], NextSeqNumber, WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, AccSeq) ->
+send_sms([Bin|T], NextSeqNumber, ConnectionPid, ProcessingPid, Socket, HandlerPid, Transport, AccSeq) ->
     <<_:12/binary, NextSeqNumber:32/integer, _/binary>> = Bin,
 
     case send(Transport, Socket, Bin) of
         ok ->
             esmpp_submit_queue:push(ProcessingPid, NextSeqNumber, esmpp_utils:now()),
-            send_sms(T, esmpp_utils:get_next_sequence_number(NextSeqNumber), WorkerPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
+            send_sms(T, esmpp_utils:get_next_sequence_number(NextSeqNumber), ConnectionPid, ProcessingPid, Socket, HandlerPid, Transport, [NextSeqNumber | AccSeq]);
         UnexpectedResponse ->
             UnexpectedResponse
     end;
 
-send_sms([], NextSeqNumber, _WorkerPid, _ProcessingPid, _Socket, _HandlerPid, _Transport, AccSeq) ->
+send_sms([], NextSeqNumber, _ConnectionPid, _ProcessingPid, _Socket, _HandlerPid, _Transport, AccSeq) ->
     {ok, NextSeqNumber, lists:reverse(AccSeq)}.
 
 loop_tcp(Buffer, Transport, Socket, ConnectionPid, HandlerPid, ProcessingPid) ->
@@ -310,6 +305,7 @@ assemble_resp({Name, Status, SeqNum, List}, ConnectionPid, HandlerPid, Processin
         	ok;
         unbind ->
             ?LOG_ERROR("received unbind connection ~p", [ConnectionPid]),
+            esmpp_utils:send_notification(ConnectionPid, {unbind, ConnectionPid}),
             Bin = esmpp_encoder:encode(unbind_resp, [], [{sequence_number, SeqNum}]),
             {close_session, Bin}
     end.

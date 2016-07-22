@@ -6,7 +6,6 @@
     lookup/2,
     lookup/3,
     delete/2,
-    replace/3,
     send_notification/2,
     revert_bin_data/1,
     to_binary/1,
@@ -30,9 +29,6 @@ lookup(Key, List) ->
 
 delete(Key, List) ->
     lists:keydelete(Key, 1, List).
-
-replace(Key, NewValue, List) ->
-    lists:keyreplace(Key, 1, List, {Key, NewValue}).
 
 revert_bin_data(Bin) ->
     revert_bin_data(Bin, <<>>).
