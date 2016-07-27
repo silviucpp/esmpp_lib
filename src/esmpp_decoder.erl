@@ -492,8 +492,14 @@ get_tag(<<TagId:16/integer, Rest/binary>>, List) ->
             {Value, Tail} = parse_other_tag(Rest),
             {Tail, [{ms_validity, Value}|List]};
         4876 ->
-            {Value, Tail} = parse_integer_tag(Rest),
-            {Tail, [{alert_on_message_delivery, Value}|List]};
+            <<L:16/integer, Bin/binary>> = Rest,
+            case L of
+                0 ->
+                    {Bin, [{alert_on_message_delivery, 0}|List]};
+                _ ->
+                    {Value, Tail} = parse_integer_tag(Rest),
+                    {Tail, [{alert_on_message_delivery, Value}|List]}
+            end;
         4992 ->
             {Value, Tail} = parse_integer_tag(Rest),
             {Tail, [{its_reply_type, Value}|List]};
